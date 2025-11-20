@@ -1,8 +1,12 @@
 import logging
+import json
+from datetime import datetime, timezone
+
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
 logger = logging.getLogger("ocpp")
+
 
 async def handle_ocpp(ws: WebSocket):
     await ws.accept()
@@ -10,22 +14,47 @@ async def handle_ocpp(ws: WebSocket):
 
     try:
         while True:
-            message = await ws.receive()   # nyers ASGI üzenet
-            msg_type = message.get("type")
+            text = await ws.receive_text()
+            logger.info(f"OCPP RAW: {text}")
 
-            if msg_type == "websocket.receive":
-                if "text" in message and message["text"] is not None:
-                    logger.info(f"OCPP TEXT üzenet: {message['text']}")
-                elif "bytes" in message and message["bytes"] is not None:
-                    logger.info(f"OCPP BYTES üzenet (hossz={len(message['bytes'])})")
-                else:
-                    logger.info(f"OCPP ismeretlen receive: {message}")
-            elif msg_type == "websocket.disconnect":
-                code = message.get("code")
-                logger.info(f"OCPP kapcsolat bontva, kód: {code}")
-                break
+            # próbáljuk JSON-ként értelmezni
+            try:
+                msg = json.loads(text)
+            except json.JSONDecodeError:
+                logger.warning("Nem JSON, ignorálom")
+                continue
+
+            # OCPP 1.6 frame: [msgTypeId, uniqueId, action, payload]
+            if not isinstance(msg, list) or len(msg) < 3:
+                logger.warning("Nem OCPP frame, ignorálom")
+                continue
+
+            msg_type = msg[0]
+            msg_id = msg[1]
+            action = msg[2]
+
+            # 2 = CALL (töltő → szerver)
+            if msg_type == 2 and action == "BootNotification":
+                logger.info("BootNotification érkezett")
+
+                now = datetime.now(timezone.utc).isoformat()
+
+                response = [
+                    3,          # CALLRESULT
+                    msg_id,     # ugyanaz az ID, mint a kérésben
+                    {
+                        "status": "Accepted",
+                        "currentTime": now,
+                        "interval": 60,   # másodperc – ennyi időnként Heartbeat
+                    },
+                ]
+
+                await ws.send_text(json.dumps(response))
+                logger.info(f"BootNotification válasz elküldve: {response}")
+
             else:
-                logger.info(f"OCPP egyéb üzenet: {message}")
+                logger.info(f"Nem kezelt OCPP üzenet: {action}")
+
     except WebSocketDisconnect as e:
         logger.info(f"OCPP kapcsolat bezárt: {e}")
     except Exception as e:
