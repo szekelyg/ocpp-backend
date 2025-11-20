@@ -34,7 +34,7 @@ async def handle_ocpp(ws: WebSocket):
             action = msg[2]
 
             # 2 = CALL (töltő → szerver)
-                        if msg_type == 2 and action == "BootNotification":
+            if msg_type == 2 and action == "BootNotification":
                 logger.info("BootNotification érkezett")
 
                 now = datetime.now(timezone.utc).isoformat()
