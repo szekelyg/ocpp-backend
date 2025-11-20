@@ -11,6 +11,8 @@ app = FastAPI()
 def health():
     return {"status": "ok"}
 
-@app.websocket("/ocpp")
-async def ocpp_endpoint(ws: WebSocket):
+# FONTOS: itt fogadjuk a /ocpp/{chargebox_id} útvonalat is
+@app.websocket("/ocpp/{chargebox_id}")
+async def ocpp_endpoint(ws: WebSocket, chargebox_id: str):
+    logger.info(f"OCPP kapcsolat érkezett: {chargebox_id}")
     await handle_ocpp(ws)
