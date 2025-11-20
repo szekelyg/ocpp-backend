@@ -11,8 +11,14 @@ app = FastAPI()
 def health():
     return {"status": "ok"}
 
-# FONTOS: itt fogadjuk a /ocpp/{chargebox_id} útvonalat is
+@app.websocket("/ocpp")
+async def ocpp_no_id(ws: WebSocket):
+    # ha a töltő csak simán /ocpp-ra csatlakozik
+    logger.info("OCPP kapcsolat érkezett path=/ocpp (nincs ID a path-ban)")
+    await handle_ocpp(ws)
+
 @app.websocket("/ocpp/{chargebox_id}")
-async def ocpp_endpoint(ws: WebSocket, chargebox_id: str):
-    logger.info(f"OCPP kapcsolat érkezett: {chargebox_id}")
+async def ocpp_with_id(ws: WebSocket, chargebox_id: str):
+    # ha a path végére odarakja az ID-t (pl. /ocpp/VLTHU001B)
+    logger.info(f"OCPP kapcsolat érkezett path=/ocpp/{chargebox_id}, ID={chargebox_id}")
     await handle_ocpp(ws)
