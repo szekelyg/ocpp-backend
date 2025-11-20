@@ -1,8 +1,9 @@
 from fastapi import FastAPI, WebSocket
 import logging
+from ocpp_ws import handle_ocpp
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("ocpp-test")
+logger = logging.getLogger("backend")
 
 app = FastAPI()
 
@@ -11,15 +12,5 @@ def health():
     return {"status": "ok"}
 
 @app.websocket("/ocpp")
-async def ocpp_ws(ws: WebSocket):
-    await ws.accept()
-    logger.info("Új OCPP kapcsolat érkezett")
-    try:
-        while True:
-            msg = await ws.receive_text()
-            logger.info(f"Üzenet: {msg}")
-            # egyelőre csak visszaküldjük, hogy lásd, működik a kör
-            await ws.send_text(f"echo: {msg}")
-    except Exception as e:
-        logger.info(f"Kapcsolat lezárult: {e}")
-        await ws.close()
+async def ocpp_endpoint(ws: WebSocket):
+    await handle_ocpp(ws)
