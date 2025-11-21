@@ -1,6 +1,6 @@
 from fastapi import FastAPI, WebSocket
 import logging
-from ocpp_ws import handle_ocpp
+from app.ocpp.ocpp_ws import handle_ocpp
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("backend")
