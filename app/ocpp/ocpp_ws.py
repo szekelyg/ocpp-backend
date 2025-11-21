@@ -1,7 +1,7 @@
 import logging
 import json
 
-from datetime import datetime, timezone
+from datetime import datetime
 from app.db.session import AsyncSessionLocal
 from app.db.models import ChargePoint
 from fastapi import WebSocket
@@ -37,6 +37,9 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: str):
             action = msg[2]
             payload = msg[3] if len(msg) > 3 and isinstance(msg[3], dict) else {}
 
+            # MINDEN timestamp UTC naiv (!) a DB miatt
+            now_dt = datetime.utcnow()
+
             # 2 = CALL (töltő → szerver)
             if msg_type == 2 and action == "BootNotification":
                 logger.info("BootNotification érkezett")
@@ -52,8 +55,6 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: str):
                             select(ChargePoint).where(ChargePoint.ocpp_id == charge_point_id)
                         )
                         cp = cp.scalar_one_or_none()
-
-                        now_dt = datetime.now(timezone.utc)
 
                         if cp is None:
                             cp = ChargePoint(
@@ -80,14 +81,15 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: str):
                 except Exception as e:
                     logger.exception(f"Hiba a ChargePoint mentésekor: {e}")
 
-                now = datetime.now(timezone.utc).isoformat()
+                # OCPP válasz is lehet UTC naiv → stringként mehet
+                now_str = now_dt.isoformat()
 
                 response = [
                     3,
                     msg_id,
                     {
                         "status": "Accepted",
-                        "currentTime": now,
+                        "currentTime": now_str,
                         "interval": 60,
                     },
                 ]
@@ -104,8 +106,9 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: str):
             elif msg_type == 2 and action == "Heartbeat":
                 logger.info("Heartbeat érkezett")
 
-                now = datetime.now(timezone.utc).isoformat()
-                response = [3, msg_id, {"currentTime": now}]
+                now_str = now_dt.isoformat()
+
+                response = [3, msg_id, {"currentTime": now_str}]
                 await ws.send_text(json.dumps(response))
                 logger.info(f"Heartbeat válasz elküldve: {response}")
 
