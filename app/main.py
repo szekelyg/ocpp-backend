@@ -1,11 +1,15 @@
 from fastapi import FastAPI, WebSocket
 import logging
 from app.ocpp.ocpp_ws import handle_ocpp
+from app.api.test_db import router as test_db_router
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("backend")
 
 app = FastAPI()
+
+app.include_router(test_db_router, prefix="/test")
 
 @app.get("/health")
 def health():
