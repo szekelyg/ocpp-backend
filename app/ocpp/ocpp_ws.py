@@ -1,9 +1,12 @@
 import logging
 import json
-from datetime import datetime, timezone
 
+from datetime import datetime, timezone
+from app.db.session import AsyncSessionLocal
+from app.db.models import ChargePoint
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
+from sqlalchemy import select
 
 logger = logging.getLogger("ocpp")
 
@@ -36,6 +39,47 @@ async def handle_ocpp(ws: WebSocket):
             # 2 = CALL (töltő → szerver)
             if msg_type == 2 and action == "BootNotification":
                 logger.info("BootNotification érkezett")
+
+                payload = data[3]
+                vendor = payload.get("chargePointVendor")
+                model = payload.get("chargePointModel")
+                serial = payload.get("chargePointSerialNumber")
+                fw = payload.get("firmwareVersion")
+
+                # DB: charge_point upsert
+                try:
+                    async with AsyncSessionLocal() as session:
+                        cp = await session.execute(
+                            select(ChargePoint).where(ChargePoint.ocpp_id == charge_point_id)
+                        )
+                        cp = cp.scalar_one_or_none()
+
+                        now_dt = datetime.now(timezone.utc)
+
+                        if cp is None:
+                            cp = ChargePoint(
+                                ocpp_id=charge_point_id,
+                                vendor=vendor,
+                                model=model,
+                                serial_number=serial,
+                                firmware_version=fw,
+                                status="available",
+                                last_seen_at=now_dt,
+                            )
+                            session.add(cp)
+                            logger.info(f"Új ChargePoint létrehozva DB-ben: {charge_point_id}")
+                        else:
+                            cp.vendor = vendor
+                            cp.model = model
+                            cp.serial_number = serial
+                            cp.firmware_version = fw
+                            cp.status = "available"
+                            cp.last_seen_at = now_dt
+                            logger.info(f"ChargePoint frissítve DB-ben: {charge_point_id}")
+
+                        await session.commit()
+                except Exception as e:
+                    logger.exception(f"Hiba a ChargePoint mentésekor: {e}")
 
                 now = datetime.now(timezone.utc).isoformat()
 
