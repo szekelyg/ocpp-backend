@@ -11,7 +11,7 @@ from sqlalchemy import select
 logger = logging.getLogger("ocpp")
 
 
-async def handle_ocpp(ws: WebSocket):
+async def handle_ocpp(ws: WebSocket, charge_point_id: str):
     await ws.accept()
     logger.info("OCPP kapcsolat nyitva")
 
@@ -35,12 +35,11 @@ async def handle_ocpp(ws: WebSocket):
             msg_type = msg[0]
             msg_id = msg[1]
             action = msg[2]
+            payload = msg[3] if len(msg) > 3 and isinstance(msg[3], dict) else {}
 
             # 2 = CALL (töltő → szerver)
             if msg_type == 2 and action == "BootNotification":
                 logger.info("BootNotification érkezett")
-
-                payload = data[3]
                 vendor = payload.get("chargePointVendor")
                 model = payload.get("chargePointModel")
                 serial = payload.get("chargePointSerialNumber")
