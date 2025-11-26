@@ -1,6 +1,6 @@
 import logging
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
@@ -120,7 +120,7 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: str | None = None):
                 response = [3, msg_id, {}]
                 await ws.send_text(json.dumps(response))
                 logger.info(f"StatusNotification válasz elküldve: {response}")
-                
+
             elif msg_type == 2 and action == "Heartbeat":
                 logger.info("Heartbeat érkezett")
 
