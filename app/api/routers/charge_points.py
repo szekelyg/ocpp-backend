@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.api.deps import get_db
 from app.db.models import ChargePoint
 
-router = APIRouter(prefix="/charge-points", tags=["charge_points"])
+router = APIRouter(prefix="/charge-points", tags=["charge-points"])
 
 
 @router.get("/", response_model=list[dict])

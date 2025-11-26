@@ -11,6 +11,60 @@ from app.db.models import ChargePoint
 
 logger = logging.getLogger("ocpp")
 
+async def upsert_charge_point_from_boot(charge_point_id: str, payload: dict):
+    vendor = payload.get("chargePointVendor")
+    model = payload.get("chargePointModel")
+    serial = payload.get("chargePointSerialNumber")
+    fw = payload.get("firmwareVersion")
+
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ChargePoint).where(ChargePoint.ocpp_id == charge_point_id)
+            )
+            cp = result.scalar_one_or_none()
+
+            now_dt = datetime.now(timezone.utc)
+
+            if cp is None:
+                cp = ChargePoint(
+                    ocpp_id=charge_point_id,
+                    vendor=vendor,
+                    model=model,
+                    serial_number=serial,
+                    firmware_version=fw,
+                    status="available",
+                    last_seen_at=now_dt,
+                )
+                session.add(cp)
+                logger.info(f"Új ChargePoint létrehozva DB-ben: {charge_point_id}")
+            else:
+                cp.vendor = vendor
+                cp.model = model
+                cp.serial_number = serial
+                cp.firmware_version = fw
+                cp.status = "available"
+                cp.last_seen_at = now_dt
+                logger.info(f"ChargePoint frissítve DB-ben: {charge_point_id}")
+
+            await session.commit()
+    except Exception as e:
+        logger.exception(f"Hiba a ChargePoint mentésekor: {e}")
+
+
+async def touch_last_seen(charge_point_id: str):
+    """Heartbeat / StatusNotification → last_seen_at frissítés."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ChargePoint).where(ChargePoint.ocpp_id == charge_point_id)
+            )
+            cp = result.scalar_one_or_none()
+            if cp:
+                cp.last_seen_at = datetime.now(timezone.utc)
+                await session.commit()
+    except Exception as e:
+        logger.exception(f"Hiba last_seen_at frissítéskor: {e}")
 
 async def handle_ocpp(ws: WebSocket, charge_point_id: str | None = None):
     await ws.accept()
@@ -42,60 +96,16 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: str | None = None):
             if msg_type == 2 and action == "BootNotification":
                 logger.info("BootNotification érkezett")
 
-                # ha nincs path ID, próbáljuk kinyerni a payloadból
-                cp_ocpp_id = (
-                    charge_point_id
-                    or payload.get("chargeBoxSerialNumber")
-                    or payload.get("chargePointSerialNumber")
-                    or "UNKNOWN"
-                )
+                # DB mentés külön függvényben
+                await upsert_charge_point_from_boot(charge_point_id, payload)
 
-                vendor = payload.get("chargePointVendor")
-                model = payload.get("chargePointModel")
-                serial = payload.get("chargePointSerialNumber")
-                fw = payload.get("firmwareVersion")
-
-                try:
-                    async with AsyncSessionLocal() as session:
-                        result = await session.execute(
-                            select(ChargePoint).where(ChargePoint.ocpp_id == cp_ocpp_id)
-                        )
-                        cp = result.scalar_one_or_none()
-
-                        now_dt = datetime.utcnow()
-
-                        if cp is None:
-                            cp = ChargePoint(
-                                ocpp_id=cp_ocpp_id,
-                                vendor=vendor,
-                                model=model,
-                                serial_number=serial,
-                                firmware_version=fw,
-                                status="available",
-                                last_seen_at=now_dt,
-                            )
-                            session.add(cp)
-                            logger.info(f"Új ChargePoint létrehozva DB-ben: {cp_ocpp_id}")
-                        else:
-                            cp.vendor = vendor
-                            cp.model = model
-                            cp.serial_number = serial
-                            cp.firmware_version = fw
-                            cp.status = "available"
-                            cp.last_seen_at = now_dt
-                            logger.info(f"ChargePoint frissítve DB-ben: {cp_ocpp_id}")
-
-                        await session.commit()
-                except Exception as e:
-                    logger.exception(f"Hiba a ChargePoint mentésekor: {e}")
-
-                now_str = datetime.utcnow().isoformat() + "Z"
+                now = datetime.now(timezone.utc).isoformat()
                 response = [
                     3,
                     msg_id,
                     {
                         "status": "Accepted",
-                        "currentTime": now_str,
+                        "currentTime": now,
                         "interval": 60,
                     },
                 ]
@@ -105,15 +115,19 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: str | None = None):
             elif msg_type == 2 and action == "StatusNotification":
                 logger.info("StatusNotification érkezett")
 
+                await touch_last_seen(charge_point_id)
+
                 response = [3, msg_id, {}]
                 await ws.send_text(json.dumps(response))
                 logger.info(f"StatusNotification válasz elküldve: {response}")
-
+                
             elif msg_type == 2 and action == "Heartbeat":
                 logger.info("Heartbeat érkezett")
 
-                now_str = datetime.utcnow().isoformat() + "Z"
-                response = [3, msg_id, {"currentTime": now_str}]
+                await touch_last_seen(charge_point_id)
+
+                now = datetime.now(timezone.utc).isoformat()
+                response = [3, msg_id, {"currentTime": now}]
                 await ws.send_text(json.dumps(response))
                 logger.info(f"Heartbeat válasz elküldve: {response}")
 
