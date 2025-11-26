@@ -21,12 +21,14 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: str | None = None):
             text = await ws.receive_text()
             logger.info(f"OCPP RAW: {text}")
 
+            # próbáljuk JSON-ként értelmezni
             try:
                 msg = json.loads(text)
             except json.JSONDecodeError:
                 logger.warning("Nem JSON, ignorálom")
                 continue
 
+            # OCPP 1.6 frame: [msgTypeId, uniqueId, action, payload]
             if not isinstance(msg, list) or len(msg) < 3:
                 logger.warning("Nem OCPP frame, ignorálom")
                 continue
@@ -36,11 +38,12 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: str | None = None):
             action = msg[2]
             payload = msg[3] if len(msg) > 3 and isinstance(msg[3], dict) else {}
 
+            # 2 = CALL (töltő → szerver)
             if msg_type == 2 and action == "BootNotification":
                 logger.info("BootNotification érkezett")
 
-                # ha nincs path ID, vegyük a payloadból
-                cp_id = (
+                # ha nincs path ID, próbáljuk kinyerni a payloadból
+                cp_ocpp_id = (
                     charge_point_id
                     or payload.get("chargeBoxSerialNumber")
                     or payload.get("chargePointSerialNumber")
@@ -55,7 +58,7 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: str | None = None):
                 try:
                     async with AsyncSessionLocal() as session:
                         result = await session.execute(
-                            select(ChargePoint).where(ChargePoint.ocpp_id == cp_id)
+                            select(ChargePoint).where(ChargePoint.ocpp_id == cp_ocpp_id)
                         )
                         cp = result.scalar_one_or_none()
 
@@ -63,7 +66,7 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: str | None = None):
 
                         if cp is None:
                             cp = ChargePoint(
-                                ocpp_id=cp_id,
+                                ocpp_id=cp_ocpp_id,
                                 vendor=vendor,
                                 model=model,
                                 serial_number=serial,
@@ -72,7 +75,7 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: str | None = None):
                                 last_seen_at=now_dt,
                             )
                             session.add(cp)
-                            logger.info(f"Új ChargePoint létrehozva DB-ben: {cp_id}")
+                            logger.info(f"Új ChargePoint létrehozva DB-ben: {cp_ocpp_id}")
                         else:
                             cp.vendor = vendor
                             cp.model = model
@@ -80,32 +83,43 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: str | None = None):
                             cp.firmware_version = fw
                             cp.status = "available"
                             cp.last_seen_at = now_dt
-                            logger.info(f"ChargePoint frissítve DB-ben: {cp_id}")
+                            logger.info(f"ChargePoint frissítve DB-ben: {cp_ocpp_id}")
 
                         await session.commit()
                 except Exception as e:
                     logger.exception(f"Hiba a ChargePoint mentésekor: {e}")
 
-                now = datetime.utcnow().isoformat() + "Z"
-                response = [3, msg_id, {"status": "Accepted", "currentTime": now, "interval": 60}]
+                now_str = datetime.utcnow().isoformat() + "Z"
+                response = [
+                    3,
+                    msg_id,
+                    {
+                        "status": "Accepted",
+                        "currentTime": now_str,
+                        "interval": 60,
+                    },
+                ]
                 await ws.send_text(json.dumps(response))
                 logger.info(f"BootNotification válasz elküldve: {response}")
 
             elif msg_type == 2 and action == "StatusNotification":
                 logger.info("StatusNotification érkezett")
+
                 response = [3, msg_id, {}]
                 await ws.send_text(json.dumps(response))
                 logger.info(f"StatusNotification válasz elküldve: {response}")
 
             elif msg_type == 2 and action == "Heartbeat":
                 logger.info("Heartbeat érkezett")
-                now = datetime.utcnow().isoformat() + "Z"
-                response = [3, msg_id, {"currentTime": now}]
+
+                now_str = datetime.utcnow().isoformat() + "Z"
+                response = [3, msg_id, {"currentTime": now_str}]
                 await ws.send_text(json.dumps(response))
                 logger.info(f"Heartbeat válasz elküldve: {response}")
 
             elif msg_type == 2 and action == "MeterValues":
                 logger.info("MeterValues érkezett")
+
                 response = [3, msg_id, {}]
                 await ws.send_text(json.dumps(response))
                 logger.info(f"MeterValues válasz elküldve: {response}")

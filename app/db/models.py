@@ -1,122 +1,87 @@
 from datetime import datetime
-from enum import Enum as PyEnum
 
 from sqlalchemy import (
     Column,
     Integer,
     String,
     DateTime,
+    Float,
     ForeignKey,
-    Numeric,
 )
 from sqlalchemy.orm import relationship
 
-from app.db.base import Base
-
-
-class ChargePointStatus(str, PyEnum):
-    offline = "offline"
-    available = "available"
-    charging = "charging"
-    faulted = "faulted"
-
-
-class ConnectorStatus(str, PyEnum):
-    available = "available"
-    occupied = "occupied"
-    charging = "charging"
-    faulted = "faulted"
-
-
-class Organization(Base):
-    __tablename__ = "organizations"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), nullable=False, unique=True)
-    slug = Column(String(255), nullable=False, unique=True)
-
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-        nullable=False,
-    )
-
-    locations = relationship("Location", back_populates="organization")
-    charge_points = relationship("ChargePoint", back_populates="organization")
-
-
-class Location(Base):
-    __tablename__ = "locations"
-
-    id = Column(Integer, primary_key=True, index=True)
-    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
-
-    name = Column(String(255), nullable=False)
-    address_text = Column(String(512), nullable=True)
-    latitude = Column(Numeric(9, 6), nullable=True)
-    longitude = Column(Numeric(9, 6), nullable=True)
-
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-        nullable=False,
-    )
-
-    organization = relationship("Organization", back_populates="locations")
-    charge_points = relationship("ChargePoint", back_populates="location")
+from .base import Base
 
 
 class ChargePoint(Base):
     __tablename__ = "charge_points"
 
     id = Column(Integer, primary_key=True, index=True)
-    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
-    location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
 
-    ocpp_id = Column(String(255), nullable=False, unique=True)  # ChargeBoxIdentity
-    serial_number = Column(String(255), nullable=True)
-    model = Column(String(255), nullable=True)
-    vendor = Column(String(255), nullable=True)
-    firmware_version = Column(String(255), nullable=True)
+    organization_id = Column(Integer, nullable=True)
+    location_id = Column(Integer, nullable=True)
 
-    status = Column(String(32), nullable=False, default=ChargePointStatus.offline.value)
+    # OCPP azonosító (amit a path-ban használunk, pl. VLTHU001B)
+    ocpp_id = Column(String, unique=True, index=True, nullable=False)
+
+    serial_number = Column(String, nullable=True)
+    model = Column(String, nullable=True)
+    vendor = Column(String, nullable=True)
+    firmware_version = Column(String, nullable=True)
+
+    status = Column(String, nullable=True)  # pl. Available, Charging, Faulted
     last_seen_at = Column(DateTime, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.utcnow(),
+    )
     updated_at = Column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
         nullable=False,
+        default=lambda: datetime.utcnow(),
+        onupdate=lambda: datetime.utcnow(),
     )
 
-    organization = relationship("Organization", back_populates="charge_points")
-    location = relationship("Location", back_populates="charge_points")
-    connectors = relationship("Connector", back_populates="charge_point")
+    sessions = relationship(
+        "ChargeSession",
+        back_populates="charge_point",
+        cascade="all, delete-orphan",
+    )
 
 
-class Connector(Base):
-    __tablename__ = "connectors"
+class ChargeSession(Base):
+    __tablename__ = "charge_sessions"
 
     id = Column(Integer, primary_key=True, index=True)
-    charge_point_id = Column(Integer, ForeignKey("charge_points.id"), nullable=False)
 
-    connector_number = Column(Integer, nullable=False)  # 1,2,3...
-    max_kw = Column(Numeric(10, 2), nullable=True)
-
-    status = Column(String(32), nullable=False, default=ConnectorStatus.available.value)
-    last_status_at = Column(DateTime, nullable=True)
-
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+    charge_point_id = Column(
+        Integer,
+        ForeignKey("charge_points.id", ondelete="CASCADE"),
         nullable=False,
     )
 
-    charge_point = relationship("ChargePoint", back_populates="connectors")
+    connector_id = Column(Integer, nullable=True)  # pl. 1,2,3...
+    ocpp_transaction_id = Column(String, nullable=True)  # StartTransaction ID
+    user_tag = Column(String, nullable=True)  # RFID / user azonosító
+
+    started_at = Column(DateTime, nullable=False)
+    finished_at = Column(DateTime, nullable=True)
+
+    energy_kwh = Column(Float, nullable=True)
+    cost_huf = Column(Float, nullable=True)
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.utcnow(),
+    )
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.utcnow(),
+        onupdate=lambda: datetime.utcnow(),
+    )
+
+    charge_point = relationship("ChargePoint", back_populates="sessions")
