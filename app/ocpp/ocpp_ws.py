@@ -14,7 +14,6 @@ logger = logging.getLogger("ocpp")
 
 
 def iso_utc_now() -> str:
-    # "Z" formátum (szebb, sok kliens szereti)
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
@@ -23,9 +22,6 @@ def utcnow():
 
 
 def extract_cp_id_from_payload(payload: dict) -> Optional[str]:
-    # OCPP BootNotification tipikusan ezeket küldi:
-    # chargeBoxSerialNumber (nálad ez VLTHU001B)
-    # chargePointSerialNumber
     cp_id = payload.get("chargeBoxSerialNumber") or payload.get("chargePointSerialNumber")
     if isinstance(cp_id, str) and cp_id.strip():
         return cp_id.strip()
@@ -92,8 +88,6 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
     await ws.accept()
     logger.info("OCPP kapcsolat nyitva")
 
-    # Ha /ocpp/{id} endpointon jött, ez már be van állítva.
-    # Ha /ocpp (id nélkül), akkor majd BootNotificationből próbáljuk kinyerni.
     cp_id: Optional[str] = charge_point_id
 
     try:
@@ -107,7 +101,6 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
                 logger.warning("Nem JSON, ignorálom")
                 continue
 
-            # OCPP 1.6 CALL frame: [msgTypeId, uniqueId, action, payload]
             if not isinstance(msg, list) or len(msg) < 3:
                 logger.warning("Nem OCPP frame, ignorálom")
                 continue
@@ -117,12 +110,12 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
             action = msg[2]
             payload = msg[3] if len(msg) > 3 and isinstance(msg[3], dict) else {}
 
-            # 2 = CALL (töltő → szerver)
+            # csak CALL (töltő -> szerver) érdekel itt
             if msg_type != 2:
                 logger.info(f"Nem CALL üzenet (type={msg_type}), ignorálom")
                 continue
 
-            # Ha még nincs cp_id (pl. /ocpp), és Boot jött, próbáljuk kinyerni
+            # ha /ocpp (id nélkül), akkor BootNotificationből szedjük ki
             if action == "BootNotification" and cp_id is None:
                 cp_id = extract_cp_id_from_payload(payload)
                 if cp_id:
@@ -136,11 +129,7 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
                 if cp_id:
                     await upsert_charge_point_from_boot(cp_id, payload)
 
-                response = [
-                    3,
-                    msg_id,
-                    {"status": "Accepted", "currentTime": iso_utc_now(), "interval": 60},
-                ]
+                response = [3, msg_id, {"status": "Accepted", "currentTime": iso_utc_now(), "interval": 60}]
                 await ws.send_text(json.dumps(response))
                 logger.info(f"BootNotification válasz elküldve: {response}")
 
@@ -167,13 +156,22 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
             elif action == "MeterValues":
                 logger.info("MeterValues érkezett")
 
-                # Most még csak ACK, DB-be majd a következő lépésben tesszük rendesen.
                 if cp_id:
                     await touch_last_seen(cp_id)
 
                 response = [3, msg_id, {}]
                 await ws.send_text(json.dumps(response))
                 logger.info(f"MeterValues válasz elküldve: {response}")
+
+            elif action == "FirmwareStatusNotification":
+                logger.info("FirmwareStatusNotification érkezett")
+
+                if cp_id:
+                    await touch_last_seen(cp_id)
+
+                response = [3, msg_id, {}]
+                await ws.send_text(json.dumps(response))
+                logger.info(f"FirmwareStatusNotification válasz elküldve: {response}")
 
             else:
                 logger.info(f"Nem kezelt OCPP üzenet: {action}")
