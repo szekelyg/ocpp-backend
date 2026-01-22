@@ -96,3 +96,4 @@ class MeterSample(Base):
 
     charge_point = relationship("ChargePoint", back_populates="samples")
     session = relationship("ChargeSession", back_populates="samples")
+    
