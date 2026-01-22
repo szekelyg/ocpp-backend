@@ -38,11 +38,11 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_charge_sessions_id'), 'charge_sessions', ['id'], unique=False)
     op.drop_index(op.f('ix_locations_id'), table_name='locations')
-    op.drop_table('locations')
+    # op.drop_table('locations')
     op.drop_index(op.f('ix_organizations_id'), table_name='organizations')
-    op.drop_table('organizations')
+    # op.drop_table('organizations')
     op.drop_index(op.f('ix_connectors_id'), table_name='connectors')
-    op.drop_table('connectors')
+    # op.drop_table('connectors')
     op.alter_column('charge_points', 'status',
                existing_type=sa.VARCHAR(length=32),
                nullable=True)
@@ -102,5 +102,5 @@ def downgrade() -> None:
     )
     op.create_index(op.f('ix_locations_id'), 'locations', ['id'], unique=False)
     op.drop_index(op.f('ix_charge_sessions_id'), table_name='charge_sessions')
-    op.drop_table('charge_sessions')
+    # op.drop_table('charge_sessions')
     # ### end Alembic commands ###
