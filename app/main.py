@@ -35,13 +35,10 @@ async def ping():
 # OCPP WebSocket endpoint – ID-val a path-ban
 @app.websocket("/ocpp/{charge_point_id}")
 async def ocpp_with_id(ws: WebSocket, charge_point_id: str):
-    logger.info(
-        f"OCPP kapcsolat érkezett path=/ocpp/{charge_point_id}, ID={charge_point_id}"
-    )
+    logger.info(f"OCPP kapcsolat érkezett path=/ocpp/{charge_point_id}, ID={charge_point_id}")
     await handle_ocpp(ws, charge_point_id)
 
-
-# OCPP WebSocket endpoint – ha nincs ID a path-ban (pl. Piehost test)
+# OCPP WebSocket endpoint – ha nincs ID a path-ban
 @app.websocket("/ocpp")
 async def ocpp_no_id(ws: WebSocket):
     logger.info("OCPP kapcsolat érkezett path=/ocpp (nincs ID a path-ban)")

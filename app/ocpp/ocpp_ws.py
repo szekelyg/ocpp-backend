@@ -1,6 +1,7 @@
 import logging
 import json
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
@@ -11,7 +12,27 @@ from app.db.models import ChargePoint
 
 logger = logging.getLogger("ocpp")
 
-async def upsert_charge_point_from_boot(charge_point_id: str, payload: dict):
+
+def iso_utc_now() -> str:
+    # "Z" formátum (szebb, sok kliens szereti)
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def utcnow():
+    return datetime.now(timezone.utc)
+
+
+def extract_cp_id_from_payload(payload: dict) -> Optional[str]:
+    # OCPP BootNotification tipikusan ezeket küldi:
+    # chargeBoxSerialNumber (nálad ez VLTHU001B)
+    # chargePointSerialNumber
+    cp_id = payload.get("chargeBoxSerialNumber") or payload.get("chargePointSerialNumber")
+    if isinstance(cp_id, str) and cp_id.strip():
+        return cp_id.strip()
+    return None
+
+
+async def upsert_charge_point_from_boot(charge_point_id: str, payload: dict) -> None:
     vendor = payload.get("chargePointVendor")
     model = payload.get("chargePointModel")
     serial = payload.get("chargePointSerialNumber")
@@ -24,7 +45,7 @@ async def upsert_charge_point_from_boot(charge_point_id: str, payload: dict):
             )
             cp = result.scalar_one_or_none()
 
-            now_dt = datetime.now(timezone.utc)
+            now_dt = utcnow()
 
             if cp is None:
                 cp = ChargePoint(
@@ -48,12 +69,12 @@ async def upsert_charge_point_from_boot(charge_point_id: str, payload: dict):
                 logger.info(f"ChargePoint frissítve DB-ben: {charge_point_id}")
 
             await session.commit()
+
     except Exception as e:
         logger.exception(f"Hiba a ChargePoint mentésekor: {e}")
 
 
-async def touch_last_seen(charge_point_id: str):
-    """Heartbeat / StatusNotification → last_seen_at frissítés."""
+async def touch_last_seen(charge_point_id: str) -> None:
     try:
         async with AsyncSessionLocal() as session:
             result = await session.execute(
@@ -61,28 +82,32 @@ async def touch_last_seen(charge_point_id: str):
             )
             cp = result.scalar_one_or_none()
             if cp:
-                cp.last_seen_at = datetime.now(timezone.utc)
+                cp.last_seen_at = utcnow()
                 await session.commit()
     except Exception as e:
         logger.exception(f"Hiba last_seen_at frissítéskor: {e}")
 
-async def handle_ocpp(ws: WebSocket, charge_point_id: str | None = None):
+
+async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
     await ws.accept()
     logger.info("OCPP kapcsolat nyitva")
+
+    # Ha /ocpp/{id} endpointon jött, ez már be van állítva.
+    # Ha /ocpp (id nélkül), akkor majd BootNotificationből próbáljuk kinyerni.
+    cp_id: Optional[str] = charge_point_id
 
     try:
         while True:
             text = await ws.receive_text()
             logger.info(f"OCPP RAW: {text}")
 
-            # próbáljuk JSON-ként értelmezni
             try:
                 msg = json.loads(text)
             except json.JSONDecodeError:
                 logger.warning("Nem JSON, ignorálom")
                 continue
 
-            # OCPP 1.6 frame: [msgTypeId, uniqueId, action, payload]
+            # OCPP 1.6 CALL frame: [msgTypeId, uniqueId, action, payload]
             if not isinstance(msg, list) or len(msg) < 3:
                 logger.warning("Nem OCPP frame, ignorálom")
                 continue
@@ -93,46 +118,58 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: str | None = None):
             payload = msg[3] if len(msg) > 3 and isinstance(msg[3], dict) else {}
 
             # 2 = CALL (töltő → szerver)
-            if msg_type == 2 and action == "BootNotification":
+            if msg_type != 2:
+                logger.info(f"Nem CALL üzenet (type={msg_type}), ignorálom")
+                continue
+
+            # Ha még nincs cp_id (pl. /ocpp), és Boot jött, próbáljuk kinyerni
+            if action == "BootNotification" and cp_id is None:
+                cp_id = extract_cp_id_from_payload(payload)
+                if cp_id:
+                    logger.info(f"ChargePoint ID kinyerve BootNotificationből: {cp_id}")
+                else:
+                    logger.warning("Nem tudtam ChargePoint ID-t kinyerni BootNotificationből")
+
+            if action == "BootNotification":
                 logger.info("BootNotification érkezett")
 
-                # DB mentés külön függvényben
-                await upsert_charge_point_from_boot(charge_point_id, payload)
+                if cp_id:
+                    await upsert_charge_point_from_boot(cp_id, payload)
 
-                now = datetime.now(timezone.utc).isoformat()
                 response = [
                     3,
                     msg_id,
-                    {
-                        "status": "Accepted",
-                        "currentTime": now,
-                        "interval": 60,
-                    },
+                    {"status": "Accepted", "currentTime": iso_utc_now(), "interval": 60},
                 ]
                 await ws.send_text(json.dumps(response))
                 logger.info(f"BootNotification válasz elküldve: {response}")
 
-            elif msg_type == 2 and action == "StatusNotification":
+            elif action == "StatusNotification":
                 logger.info("StatusNotification érkezett")
 
-                await touch_last_seen(charge_point_id)
+                if cp_id:
+                    await touch_last_seen(cp_id)
 
                 response = [3, msg_id, {}]
                 await ws.send_text(json.dumps(response))
                 logger.info(f"StatusNotification válasz elküldve: {response}")
 
-            elif msg_type == 2 and action == "Heartbeat":
+            elif action == "Heartbeat":
                 logger.info("Heartbeat érkezett")
 
-                await touch_last_seen(charge_point_id)
+                if cp_id:
+                    await touch_last_seen(cp_id)
 
-                now = datetime.now(timezone.utc).isoformat()
-                response = [3, msg_id, {"currentTime": now}]
+                response = [3, msg_id, {"currentTime": iso_utc_now()}]
                 await ws.send_text(json.dumps(response))
                 logger.info(f"Heartbeat válasz elküldve: {response}")
 
-            elif msg_type == 2 and action == "MeterValues":
+            elif action == "MeterValues":
                 logger.info("MeterValues érkezett")
+
+                # Most még csak ACK, DB-be majd a következő lépésben tesszük rendesen.
+                if cp_id:
+                    await touch_last_seen(cp_id)
 
                 response = [3, msg_id, {}]
                 await ws.send_text(json.dumps(response))

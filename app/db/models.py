@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column,
@@ -11,6 +11,10 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from .base import Base
+
+
+def utcnow():
+    return datetime.now(timezone.utc)
 
 
 class ChargePoint(Base):
@@ -29,19 +33,19 @@ class ChargePoint(Base):
     vendor = Column(String, nullable=True)
     firmware_version = Column(String, nullable=True)
 
-    status = Column(String, nullable=True)  # pl. Available, Charging, Faulted
-    last_seen_at = Column(DateTime, nullable=True)
+    status = Column(String(32), nullable=False, default="available")
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.utcnow(),
+        default=utcnow,
     )
     updated_at = Column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.utcnow(),
-        onupdate=lambda: datetime.utcnow(),
+        default=utcnow,
+        onupdate=utcnow,
     )
 
     sessions = relationship(
@@ -66,22 +70,22 @@ class ChargeSession(Base):
     ocpp_transaction_id = Column(String, nullable=True)  # StartTransaction ID
     user_tag = Column(String, nullable=True)  # RFID / user azonosító
 
-    started_at = Column(DateTime, nullable=False)
-    finished_at = Column(DateTime, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
 
     energy_kwh = Column(Float, nullable=True)
     cost_huf = Column(Float, nullable=True)
 
     created_at = Column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.utcnow(),
+        default=utcnow,
     )
     updated_at = Column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.utcnow(),
-        onupdate=lambda: datetime.utcnow(),
+        default=utcnow,
+        onupdate=utcnow,
     )
 
     charge_point = relationship("ChargePoint", back_populates="sessions")
