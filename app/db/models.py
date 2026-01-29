@@ -53,7 +53,7 @@ class ChargeSession(Base):
     charge_point_id = Column(Integer, ForeignKey("charge_points.id", ondelete="CASCADE"), nullable=False)
 
     connector_id = Column(Integer, nullable=True)  # pl. 1,2,3...
-    ocpp_transaction_id = Column(String, nullable=True)  # StartTransaction transactionId
+    ocpp_transaction_id = Column(String, unique=True, nullable=True)
     user_tag = Column(String, nullable=True)  # RFID / user azonosító
 
     started_at = Column(DateTime(timezone=True), nullable=False)
