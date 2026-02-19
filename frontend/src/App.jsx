@@ -10,8 +10,8 @@ function FitToMarkers({ points }) {
     if (!points?.length) return;
 
     const valid = points
-      .filter(p => typeof p.latitude === "number" && typeof p.longitude === "number")
-      .map(p => [p.latitude, p.longitude]);
+      .filter((p) => typeof p.latitude === "number" && typeof p.longitude === "number")
+      .map((p) => [p.latitude, p.longitude]);
 
     if (valid.length === 0) return;
 
@@ -20,7 +20,7 @@ function FitToMarkers({ points }) {
       return;
     }
 
-    const L = window.L; // Leaflet global (react-leaflet betölti)
+    const L = window.L;
     if (!L) return;
 
     const bounds = L.latLngBounds(valid);
@@ -35,6 +35,20 @@ function formatHu(dtIso) {
   const d = new Date(dtIso);
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleString("hu-HU");
+}
+
+function norm(s) {
+  return (s || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function placeLines(cp) {
+  const a = (cp?.location_name || "").trim();
+  const b = (cp?.address_text || "").trim();
+  if (!a && !b) return ["—"];
+  if (a && !b) return [a];
+  if (!a && b) return [b];
+  if (norm(a) === norm(b)) return [a]; // ugyanaz -> egyszer
+  return [a, b];
 }
 
 export default function App() {
@@ -62,14 +76,18 @@ export default function App() {
 
   useEffect(() => {
     refresh();
-    const t = setInterval(refresh, 5000); // 5s poll MVP-hez
+    const t = setInterval(refresh, 5000);
     return () => clearInterval(t);
   }, []);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return items.filter(cp => {
-      const okStatus = statusFilter === "all" ? true : (cp.status || "").toLowerCase() === statusFilter;
+    return items.filter((cp) => {
+      const okStatus =
+        statusFilter === "all"
+          ? true
+          : (cp.status || "").toLowerCase() === statusFilter;
+
       const hay = `${cp.ocpp_id || ""} ${cp.location_name || ""} ${cp.address_text || ""}`.toLowerCase();
       const okQ = s ? hay.includes(s) : true;
       return okStatus && okQ;
@@ -77,7 +95,7 @@ export default function App() {
   }, [items, q, statusFilter]);
 
   const selected = useMemo(() => {
-    return items.find(x => x.id === selectedId) || filtered[0] || null;
+    return items.find((x) => x.id === selectedId) || filtered[0] || null;
   }, [items, filtered, selectedId]);
 
   useEffect(() => {
@@ -85,13 +103,13 @@ export default function App() {
   }, [selected, selectedId]);
 
   const statuses = useMemo(() => {
-    const set = new Set(items.map(x => (x.status || "").toLowerCase()).filter(Boolean));
+    const set = new Set(items.map((x) => (x.status || "").toLowerCase()).filter(Boolean));
     return ["all", ...Array.from(set)];
   }, [items]);
 
   const mapPoints = useMemo(() => filtered, [filtered]);
 
-  const centerFallback = [47.49, 18.94]; // Budapest környéke fallback
+  const centerFallback = [47.49, 18.94];
 
   return (
     <div className="app">
@@ -113,7 +131,6 @@ export default function App() {
       <hr className="sep" />
 
       <div className="grid">
-        {/* LEFT: Map */}
         <div className="card">
           <div className="cardHeader">
             <div>
@@ -138,14 +155,17 @@ export default function App() {
             <div className="mapWrap">
               <MapContainer center={centerFallback} zoom={12} scrollWheelZoom>
                 <TileLayer
-                  attribution='&copy; OpenStreetMap'
+                  attribution="&copy; OpenStreetMap"
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
 
                 <FitToMarkers points={mapPoints} />
 
-                {mapPoints.map(cp => {
+                {mapPoints.map((cp) => {
                   if (typeof cp.latitude !== "number" || typeof cp.longitude !== "number") return null;
+
+                  const lines = placeLines(cp);
+
                   return (
                     <Marker
                       key={cp.id}
@@ -157,8 +177,10 @@ export default function App() {
                       <Popup>
                         <div style={{ minWidth: 180 }}>
                           <b>{cp.ocpp_id}</b>
-                          <div>{cp.location_name || "—"}</div>
-                          <div style={{ opacity: 0.8, fontSize: 12 }}>{cp.address_text || ""}</div>
+                          <div>{lines[0]}</div>
+                          {lines[1] ? (
+                            <div style={{ opacity: 0.8, fontSize: 12 }}>{lines[1]}</div>
+                          ) : null}
                           <div style={{ marginTop: 6 }}>
                             státusz: <b>{cp.status}</b>
                           </div>
@@ -172,7 +194,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* RIGHT: List + Details */}
         <div className="rightCol">
           <div className="card">
             <div className="cardHeader">
@@ -205,7 +226,7 @@ export default function App() {
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
               >
-                {statuses.map(s => (
+                {statuses.map((s) => (
                   <option key={s} value={s}>
                     {s === "all" ? "Minden státusz" : s}
                   </option>
@@ -215,26 +236,33 @@ export default function App() {
               <div style={{ height: 10 }} />
 
               <div className="list">
-                {filtered.map(cp => (
-                  <div
-                    key={cp.id}
-                    className="item"
-                    onClick={() => setSelectedId(cp.id)}
-                    style={{
-                      outline: selected?.id === cp.id ? "2px solid rgba(59,130,246,0.35)" : "none"
-                    }}
-                  >
-                    <div className="itemTop">
-                      <div className="itemId">{cp.ocpp_id}</div>
-                      <div className="badge">{cp.status || "unknown"}</div>
+                {filtered.map((cp) => {
+                  const lines = placeLines(cp);
+                  return (
+                    <div
+                      key={cp.id}
+                      className="item"
+                      onClick={() => setSelectedId(cp.id)}
+                      style={{
+                        outline: selected?.id === cp.id ? "2px solid rgba(59,130,246,0.35)" : "none",
+                      }}
+                    >
+                      <div className="itemTop">
+                        <div className="itemId">{cp.ocpp_id}</div>
+                        <div className="badge">{cp.status || "unknown"}</div>
+                      </div>
+                      <div className="itemMeta">
+                        {lines[0]}
+                        {lines[1] ? (
+                          <>
+                            <br />
+                            {lines[1]}
+                          </>
+                        ) : null}
+                      </div>
                     </div>
-                    <div className="itemMeta">
-                      {cp.location_name || "—"}
-                      <br />
-                      {cp.address_text || ""}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -254,25 +282,27 @@ export default function App() {
                 <>
                   <div className="detailGrid">
                     <div className="key">OCPP ID</div>
-                    <div className="val"><b>{selected.ocpp_id}</b></div>
+                    <div className="val">
+                      <b>{selected.ocpp_id}</b>
+                    </div>
 
                     <div className="key">Hely</div>
-                    <div className="val">{selected.location_name || "—"}</div>
+                    <div className="val">{placeLines(selected)[0] || "—"}</div>
 
                     <div className="key">Cím</div>
-                    <div className="val">{selected.address_text || "—"}</div>
+                    <div className="val">{placeLines(selected)[1] || "—"}</div>
 
                     <div className="key">Státusz</div>
-                    <div className="val"><span className="badge">{selected.status || "unknown"}</span></div>
+                    <div className="val">
+                      <span className="badge">{selected.status || "unknown"}</span>
+                    </div>
 
                     <div className="key">Utoljára látva</div>
                     <div className="val">{formatHu(selected.last_seen_at)}</div>
                   </div>
 
                   <div className="actions">
-                    <button className="btn btnPrimary">
-                      Töltés indítása (QR)
-                    </button>
+                    <button className="btn btnPrimary">Töltés indítása (QR)</button>
 
                     <button
                       className="btn btnGhost"
@@ -294,9 +324,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="smallFooter">
-            MVP • térkép + lista • QR indítás + fizetés jön (SimplePay/Stripe).
-          </div>
+          <div className="smallFooter">MVP • térkép + lista • QR indítás + fizetés jön (SimplePay/Stripe).</div>
         </div>
       </div>
     </div>

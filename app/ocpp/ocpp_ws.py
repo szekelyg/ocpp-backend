@@ -1,3 +1,4 @@
+# app/ocpp/ocpp_ws.py
 import asyncio
 import json
 import logging
@@ -15,19 +16,19 @@ from app.db.models import ChargePoint, MeterSample, ChargeSession
 logger = logging.getLogger("ocpp")
 
 # ======================================================================================
-# GLOBAL: aktív kapcsolatok + pending CALL-ok (RemoteStart/RemoteStop-hoz)
+# GLOBAL STATE: aktív WS kapcsolatok + pending CALL-ok (RemoteStart/RemoteStop-hoz)
 # ======================================================================================
 
 # cp_id -> websocket
 _ACTIVE_WS: Dict[str, WebSocket] = {}
 
-# cp_id -> counter
+# cp_id -> counter (uniqueId generálás)
 _CP_MSG_COUNTER: Dict[str, int] = {}
 
-# (cp_id, unique_id) -> future
+# (cp_id, unique_id) -> future (CALLRESULT/CALLERROR várás)
 _PENDING_CALLS: Dict[Tuple[str, str], asyncio.Future] = {}
 
-# egy lock elég (kis rendszer)
+# egy lock bőven elég ehhez az MVP-hez
 _REGISTRY_LOCK = asyncio.Lock()
 
 
@@ -44,6 +45,9 @@ def iso_utc_now_z() -> str:
 
 
 def parse_ocpp_timestamp(ts: Any) -> datetime:
+    """
+    OCPP timestamp lehet "Z" vagy +00:00; mindent UTC datetime-re hozunk.
+    """
     if not isinstance(ts, str) or not ts.strip():
         return utcnow()
 
@@ -51,18 +55,16 @@ def parse_ocpp_timestamp(ts: Any) -> datetime:
     try:
         if s.endswith("Z"):
             s = s[:-1] + "+00:00"
-
         dt = datetime.fromisoformat(s)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-
         return dt.astimezone(timezone.utc)
     except Exception:
         return utcnow()
 
 
 # ======================================================================================
-# ID HELPERS
+# ID + PARSE HELPERS
 # ======================================================================================
 
 def extract_cp_id_from_boot(payload: dict) -> Optional[str]:
@@ -74,18 +76,11 @@ def extract_cp_id_from_boot(payload: dict) -> Optional[str]:
 
 async def _next_unique_id(cp_id: str) -> str:
     async with _REGISTRY_LOCK:
-        cur = _CP_MSG_COUNTER.get(cp_id)
-        if cur is None:
-            # induljunk nagyobb számról, hogy ne keveredjen “emberi” id-kkel
-            cur = 900_000_000
+        cur = _CP_MSG_COUNTER.get(cp_id, 900_000_000)
         cur += 1
         _CP_MSG_COUNTER[cp_id] = cur
         return str(cur)
 
-
-# ======================================================================================
-# MISC HELPERS
-# ======================================================================================
 
 def _as_float(v: Any) -> Optional[float]:
     try:
@@ -108,6 +103,9 @@ def _as_int(v: Any) -> Optional[int]:
 
 
 def _pick_measurand_sum(sampled_values: Any, measurand: str) -> Optional[float]:
+    """
+    sampledValue listából kivesszük a measurand összegzett értékét.
+    """
     if not isinstance(sampled_values, list):
         return None
 
@@ -130,11 +128,6 @@ def _pick_measurand_sum(sampled_values: Any, measurand: str) -> Optional[float]:
 
 
 def _normalize_cp_status(ocpp_status: Any) -> str:
-    """
-    OCPP 1.6 StatusNotification.status: Available, Charging, Preparing, Finishing,
-    SuspendedEV, SuspendedEVSE, Unavailable, Faulted, Reserved...
-    Mi egyszerűen lower-case-ben tároljuk.
-    """
     if isinstance(ocpp_status, str) and ocpp_status.strip():
         return ocpp_status.strip().lower()
     return "unknown"
@@ -174,7 +167,6 @@ async def upsert_charge_point_from_boot(cp_id: str, payload: dict) -> None:
                 cp.model = model
                 cp.serial_number = serial
                 cp.firmware_version = fw
-                # boot után tipikusan Available lesz
                 cp.status = "available"
                 cp.last_seen_at = now_dt
                 logger.info(f"ChargePoint frissítve: {cp_id}")
@@ -196,25 +188,32 @@ async def touch_last_seen(cp_id: str) -> None:
         logger.exception(f"Hiba last_seen_at frissítéskor: {e}")
 
 
-async def set_cp_status(cp_id: str, status: str) -> None:
+async def save_status_notification(cp_id: str, payload: dict) -> None:
+    """
+    StatusNotification payload tipikusan:
+    { connectorId, status, errorCode, timestamp }
+    """
     try:
+        st = _normalize_cp_status(payload.get("status"))
+
         async with AsyncSessionLocal() as session:
             cp = (await session.execute(select(ChargePoint).where(ChargePoint.ocpp_id == cp_id))).scalar_one_or_none()
             if not cp:
                 return
-            cp.status = status
+            cp.status = st
             cp.last_seen_at = utcnow()
             await session.commit()
+
     except Exception as e:
-        logger.exception(f"Hiba status frissítéskor: {e}")
+        logger.exception(f"Hiba StatusNotification mentésekor: {e}")
 
 
 async def find_active_session_id(session, cp_db_id: int, connector_id: Optional[int]) -> Optional[int]:
     """
-    VOLTIE-kompatibilis:
-    - először exact match connector_id-ra
-    - ha MeterValues connectorId=0, akkor próbáljuk meg connector=1-gyel is
-    - fallback: bármely aktív session ezen a CP-n
+    VOLTIE-kompatibilis session keresés:
+    - exact connector match
+    - ha connectorId=0 -> próbáljuk 1-gyel
+    - fallback: bármely aktív session CP-n
     """
     async def _find_for_connector(cid: Optional[int]) -> Optional[int]:
         if cid is None:
@@ -310,15 +309,14 @@ async def start_transaction(cp_id: str, payload: dict) -> Optional[int]:
             session.add(cs)
             await session.flush()  # cs.id
 
-            # nálunk a CSMS által kiosztott transactionId = session id
+            # nálunk CSMS transactionId = session id
             cs.ocpp_transaction_id = str(cs.id)
 
-            cp.last_seen_at = utcnow()
-            # ha töltés indul, legyen charging
+            # státusz: töltés indul
             cp.status = "charging"
+            cp.last_seen_at = utcnow()
 
             await session.commit()
-
             logger.info(f"Session indítva: id={cs.id} cp={cp_id} connector={connector_id}")
             return cs.id
 
@@ -380,8 +378,8 @@ async def stop_transaction(cp_id: str, payload: dict) -> None:
             if first_wh is not None and last_wh is not None and last_wh >= first_wh:
                 cs.energy_kwh = (last_wh - first_wh) / 1000.0
 
-            cp.last_seen_at = utcnow()
             cp.status = "available"
+            cp.last_seen_at = utcnow()
 
             await session.commit()
             logger.info(f"Session lezárva: id={cs.id} tx={transaction_id} energy_kwh={cs.energy_kwh}")
@@ -391,7 +389,7 @@ async def stop_transaction(cp_id: str, payload: dict) -> None:
 
 
 # ======================================================================================
-# METERVALUE HANDLER
+# METERVALUES HANDLER
 # ======================================================================================
 
 async def save_meter_values(cp_id: str, payload: dict) -> None:
@@ -413,7 +411,10 @@ async def save_meter_values(cp_id: str, payload: dict) -> None:
                 logger.warning(f"MeterValues: nincs ilyen CP: {cp_id}")
                 return
 
+            # 1) tx alapján (ha van)
             active_session_id = await find_session_id_by_tx(session, cp.id, transaction_id)
+
+            # 2) fallback connector alapján
             if active_session_id is None:
                 active_session_id = await find_active_session_id(session, cp.id, connector_id)
 
@@ -454,9 +455,9 @@ async def save_meter_values(cp_id: str, payload: dict) -> None:
 # REMOTE START/STOP (CSMS -> CP)
 # ======================================================================================
 
-async def _send_call_and_wait(cp_id: str, action: str, payload: dict, timeout_s: float = 10.0) -> dict:
+async def _send_call_and_wait(cp_id: str, action: str, payload: dict, timeout_s: float = 12.0) -> dict:
     """
-    OCPP CALL (2) küldése a töltőnek és CALLRESULT (3) megvárása.
+    OCPP CALL (2) küldése a töltőnek és CALLRESULT (3) / CALLERROR (4) megvárása.
     """
     async with _REGISTRY_LOCK:
         ws = _ACTIVE_WS.get(cp_id)
@@ -475,9 +476,7 @@ async def _send_call_and_wait(cp_id: str, action: str, payload: dict, timeout_s:
         logger.info(f"CSMS->CP CALL elküldve: cp={cp_id} action={action} uid={uid}")
 
         res = await asyncio.wait_for(fut, timeout=timeout_s)
-        if not isinstance(res, dict):
-            return {}
-        return res
+        return res if isinstance(res, dict) else {}
 
     finally:
         async with _REGISTRY_LOCK:
@@ -487,21 +486,22 @@ async def _send_call_and_wait(cp_id: str, action: str, payload: dict, timeout_s:
 async def remote_start_transaction(cp_id: str, connector_id: int = 1, id_tag: str = "ANON") -> dict:
     """
     RemoteStartTransaction (OCPP 1.6): { connectorId?, idTag, chargingProfile? }
-    Válasz tipikusan: { status: "Accepted" | "Rejected" }
     """
-    payload = {
-        "connectorId": int(connector_id),
-        "idTag": str(id_tag),
-    }
+    payload = {"connectorId": int(connector_id), "idTag": str(id_tag)}
     return await _send_call_and_wait(cp_id, "RemoteStartTransaction", payload, timeout_s=12.0)
 
 
 async def remote_stop_transaction(cp_id: str, transaction_id: Any) -> dict:
     """
     RemoteStopTransaction (OCPP 1.6): { transactionId }
-    Válasz tipikusan: { status: "Accepted" | "Rejected" }
     """
-    payload = {"transactionId": int(transaction_id) if isinstance(transaction_id, int) else transaction_id}
+    if transaction_id is None:
+        return {"status": "Rejected", "reason": "missing_transaction_id"}
+    try:
+        tx = int(transaction_id)
+    except Exception:
+        tx = transaction_id
+    payload = {"transactionId": tx}
     return await _send_call_and_wait(cp_id, "RemoteStopTransaction", payload, timeout_s=12.0)
 
 
@@ -515,6 +515,11 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
 
     cp_id: Optional[str] = charge_point_id
 
+    # ha path-ban jött az ID, regisztráljuk rögtön
+    if cp_id:
+        async with _REGISTRY_LOCK:
+            _ACTIVE_WS[cp_id] = ws
+
     try:
         while True:
             raw = await ws.receive_text()
@@ -526,45 +531,45 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
                 logger.warning("Nem JSON, ignorálom")
                 continue
 
-            if not isinstance(msg, list) or len(msg) < 3:
+            if not isinstance(msg, list) or len(msg) < 2:
                 logger.warning("Nem OCPP frame, ignorálom")
                 continue
 
             msg_type = msg[0]
-            msg_id = msg[1]
+            unique_id = str(msg[1])
 
-            # ------------------------------------------------------------------------------
-            # CALLRESULT (3) / CALLERROR (4) kezelése (RemoteStart/Stop válaszok miatt)
-            # ------------------------------------------------------------------------------
+            # --------------------------------------------------------------------------
+            # CALLRESULT (3) / CALLERROR (4) - pending remote CALL-ok miatt
+            # --------------------------------------------------------------------------
             if msg_type in (3, 4):
                 if not cp_id:
-                    # még nincs cp_id, nem tudunk mit kezdeni vele
                     continue
 
-                payload = msg[2] if (len(msg) > 2 and isinstance(msg[2], dict)) else {}
-                key = (cp_id, str(msg_id))
+                key = (cp_id, unique_id)
 
                 async with _REGISTRY_LOCK:
                     fut = _PENDING_CALLS.get(key)
 
                 if fut and not fut.done():
                     if msg_type == 3:
+                        payload = msg[2] if (len(msg) > 2 and isinstance(msg[2], dict)) else {}
                         fut.set_result(payload)
                     else:
-                        # CALLERROR: [4, uniqueId, errorCode, errorDescription, errorDetails]
+                        # [4, uniqueId, errorCode, errorDescription, errorDetails]
                         err = {
+                            "status": "Error",
                             "errorCode": msg[2] if len(msg) > 2 else "Unknown",
                             "errorDescription": msg[3] if len(msg) > 3 else "",
                             "errorDetails": msg[4] if len(msg) > 4 else {},
                         }
-                        fut.set_result({"status": "Error", **err})
+                        fut.set_result(err)
 
                 continue
 
-            # ------------------------------------------------------------------------------
-            # CALL (2) - bejövő üzenetek a töltőtől
-            # ------------------------------------------------------------------------------
-            if msg_type != 2:
+            # --------------------------------------------------------------------------
+            # csak CALL (2)
+            # --------------------------------------------------------------------------
+            if msg_type != 2 or len(msg) < 3:
                 logger.info(f"Nem CALL üzenet (type={msg_type}), ignorálom")
                 continue
 
@@ -576,75 +581,70 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
                 cp_id = extract_cp_id_from_boot(payload)
                 if cp_id:
                     logger.info(f"ChargePoint ID kinyerve BootNotificationből: {cp_id}")
-
-                    # regisztráljuk WS-t
                     async with _REGISTRY_LOCK:
                         _ACTIVE_WS[cp_id] = ws
                 else:
                     logger.warning("Nem tudtam ChargePoint ID-t kinyerni BootNotificationből")
 
-            # ha path-ból volt cp_id, akkor is regisztráljuk
-            if cp_id and action != "BootNotification":
-                async with _REGISTRY_LOCK:
-                    if _ACTIVE_WS.get(cp_id) is not ws:
-                        _ACTIVE_WS[cp_id] = ws
-
             if not cp_id:
-                await ws.send_text(json.dumps([3, msg_id, {}]))
+                # nincs cp_id, de ACK-oljunk safe defaulttal
+                await ws.send_text(json.dumps([3, unique_id, {}]))
                 continue
 
-            # ------------------------------------------------------------------------------
+            # biztonság kedvéért: ha cp_id már megvan, tartsuk a registry-t frissen
+            async with _REGISTRY_LOCK:
+                if _ACTIVE_WS.get(cp_id) is not ws:
+                    _ACTIVE_WS[cp_id] = ws
+
+            # --------------------------------------------------------------------------
             # ACTION HANDLERS
-            # ------------------------------------------------------------------------------
+            # --------------------------------------------------------------------------
             if action == "BootNotification":
-                logger.info("BootNotification érkezett")
                 await upsert_charge_point_from_boot(cp_id, payload)
-                response = [3, msg_id, {"status": "Accepted", "currentTime": iso_utc_now_z(), "interval": 60}]
+                response = [3, unique_id, {"status": "Accepted", "currentTime": iso_utc_now_z(), "interval": 60}]
                 await ws.send_text(json.dumps(response))
 
             elif action == "Heartbeat":
                 await touch_last_seen(cp_id)
-                response = [3, msg_id, {"currentTime": iso_utc_now_z()}]
+                response = [3, unique_id, {"currentTime": iso_utc_now_z()}]
                 await ws.send_text(json.dumps(response))
 
             elif action == "StatusNotification":
-                # itt frissítjük a DB status-t is
-                st = _normalize_cp_status(payload.get("status"))
-                await set_cp_status(cp_id, st)
-                response = [3, msg_id, {}]
+                await save_status_notification(cp_id, payload)
+                response = [3, unique_id, {}]
                 await ws.send_text(json.dumps(response))
 
             elif action == "FirmwareStatusNotification":
                 await touch_last_seen(cp_id)
-                response = [3, msg_id, {}]
+                response = [3, unique_id, {}]
                 await ws.send_text(json.dumps(response))
 
             elif action == "StartTransaction":
                 tx_id = await start_transaction(cp_id, payload)
-                response = [3, msg_id, {"transactionId": int(tx_id or 0), "idTagInfo": {"status": "Accepted"}}]
+                response = [3, unique_id, {"transactionId": int(tx_id or 0), "idTagInfo": {"status": "Accepted"}}]
                 await ws.send_text(json.dumps(response))
 
             elif action == "StopTransaction":
                 await stop_transaction(cp_id, payload)
-                response = [3, msg_id, {"idTagInfo": {"status": "Accepted"}}]
+                response = [3, unique_id, {"idTagInfo": {"status": "Accepted"}}]
                 await ws.send_text(json.dumps(response))
 
             elif action == "MeterValues":
                 await save_meter_values(cp_id, payload)
-                response = [3, msg_id, {}]
+                response = [3, unique_id, {}]
                 await ws.send_text(json.dumps(response))
 
             else:
                 logger.info(f"Nem kezelt OCPP üzenet: {action} (ACK safe default)")
-                response = [3, msg_id, {}]
+                response = [3, unique_id, {}]
                 await ws.send_text(json.dumps(response))
 
     except WebSocketDisconnect:
-        logger.info("OCPP kapcsolat lezárva")
+        logger.info("OCPP kapcsolat lezárva (WebSocketDisconnect)")
     except Exception as e:
         logger.exception(f"OCPP hiba: {e}")
     finally:
-        # cleanup
+        # cleanup registry
         if cp_id:
             async with _REGISTRY_LOCK:
                 if _ACTIVE_WS.get(cp_id) is ws:
