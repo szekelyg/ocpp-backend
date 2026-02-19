@@ -1,251 +1,194 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  MapContainer,
-  TileLayer,
-  Marker,
-  Popup,
-  useMap,
-} from "react-leaflet";
-import "leaflet/dist/leaflet.css";
-import L from "leaflet";
+import { useEffect, useMemo, useState } from "react";
+import "./App.css";
 
-
-// Fix Leaflet marker icon paths (Vite alatt gyakran “eltűnik”)
-import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
-import markerIcon from "leaflet/dist/images/marker-icon.png";
-import markerShadow from "leaflet/dist/images/marker-shadow.png";
-
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: markerIcon2x,
-  iconUrl: markerIcon,
-  shadowUrl: markerShadow,
-});
-
-// ---- helpers ----
-const PRICE_HUF_PER_KWH = 1;      // MVP: 1 Ft/kWh
-const PREAUTH_HUF = 5000;         // MVP: 5000 Ft zárolás
-
-function fmtDateTime(iso) {
-  if (!iso) return "—";
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString("hu-HU");
-  } catch {
-    return iso;
-  }
-}
-
-function statusBadgeClass(status) {
-  const s = (status || "").toLowerCase();
-  if (s.includes("charging")) return "badge badge--charging";
-  if (s.includes("available")) return "badge badge--ok";
-  if (s.includes("fault") || s.includes("error")) return "badge badge--bad";
-  return "badge";
-}
-
-function calcMapCenter(points) {
-  const withCoords = points.filter(
-    (p) => typeof p.latitude === "number" && typeof p.longitude === "number"
-  );
-  if (!withCoords.length) return [47.4979, 19.0402]; // Budapest fallback
-  const lat = withCoords.reduce((a, p) => a + p.latitude, 0) / withCoords.length;
-  const lon = withCoords.reduce((a, p) => a + p.longitude, 0) / withCoords.length;
-  return [lat, lon];
-}
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 
 function FitToMarkers({ points }) {
   const map = useMap();
-  const didFit = useRef(false);
 
   useEffect(() => {
-    // csak első betöltésnél fitBounds (ne rángassa a usert)
-    if (didFit.current) return;
-    const coords = points
-      .filter((p) => typeof p.latitude === "number" && typeof p.longitude === "number")
-      .map((p) => [p.latitude, p.longitude]);
-    if (!coords.length) return;
+    if (!points?.length) return;
 
-    const b = L.latLngBounds(coords);
-    map.fitBounds(b.pad(0.25));
-    didFit.current = true;
+    const valid = points
+      .filter(p => typeof p.latitude === "number" && typeof p.longitude === "number")
+      .map(p => [p.latitude, p.longitude]);
+
+    if (valid.length === 0) return;
+
+    if (valid.length === 1) {
+      map.setView(valid[0], 13, { animate: true });
+      return;
+    }
+
+    const L = window.L; // Leaflet global (react-leaflet betölti)
+    if (!L) return;
+
+    const bounds = L.latLngBounds(valid);
+    map.fitBounds(bounds, { padding: [30, 30] });
   }, [map, points]);
 
   return null;
 }
 
+function formatHu(dtIso) {
+  if (!dtIso) return "—";
+  const d = new Date(dtIso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("hu-HU");
+}
+
 export default function App() {
+  const PRICE_FT_PER_KWH = 1;
+  const HOLD_FT = 5000;
+
   const [items, setItems] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
-
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [loading, setLoading] = useState(false);
 
-  async function load() {
-    setErr("");
-    setLoading(true);
+  async function refresh() {
     try {
-      const r = await fetch("/api/charge-points/");
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const data = await r.json();
+      setLoading(true);
+      const res = await fetch("/api/charge-points/");
+      const data = await res.json();
       setItems(Array.isArray(data) ? data : []);
       setLastUpdated(new Date());
-      // ha eddig semmi nem volt kiválasztva, válasszuk az elsőt
-      if (!selectedId && Array.isArray(data) && data.length) {
-        setSelectedId(data[0].id);
-      }
-    } catch (e) {
-      setErr(e?.message || "Ismeretlen hiba");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    load();
-    const t = setInterval(load, 30_000); // 30s auto refresh
+    refresh();
+    const t = setInterval(refresh, 5000); // 5s poll MVP-hez
     return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return items.filter((cp) => {
-      const matchesQ =
-        !needle ||
-        (cp.ocpp_id || "").toLowerCase().includes(needle) ||
-        (cp.location_name || "").toLowerCase().includes(needle) ||
-        (cp.address_text || "").toLowerCase().includes(needle);
-
-      const s = (cp.status || "").toLowerCase();
-      const matchesStatus =
-        statusFilter === "all" ||
-        (statusFilter === "available" && s.includes("available")) ||
-        (statusFilter === "charging" && s.includes("charging")) ||
-        (statusFilter === "offline" && (s.includes("offline") || s.includes("unavailable"))) ||
-        (statusFilter === "error" && (s.includes("fault") || s.includes("error")));
-
-      return matchesQ && matchesStatus;
+    const s = q.trim().toLowerCase();
+    return items.filter(cp => {
+      const okStatus = statusFilter === "all" ? true : (cp.status || "").toLowerCase() === statusFilter;
+      const hay = `${cp.ocpp_id || ""} ${cp.location_name || ""} ${cp.address_text || ""}`.toLowerCase();
+      const okQ = s ? hay.includes(s) : true;
+      return okStatus && okQ;
     });
   }, [items, q, statusFilter]);
 
-  const selected = useMemo(
-    () => items.find((x) => x.id === selectedId) || null,
-    [items, selectedId]
-  );
+  const selected = useMemo(() => {
+    return items.find(x => x.id === selectedId) || filtered[0] || null;
+  }, [items, filtered, selectedId]);
 
-  const center = useMemo(() => calcMapCenter(items), [items]);
+  useEffect(() => {
+    if (selected && selectedId == null) setSelectedId(selected.id);
+  }, [selected, selectedId]);
+
+  const statuses = useMemo(() => {
+    const set = new Set(items.map(x => (x.status || "").toLowerCase()).filter(Boolean));
+    return ["all", ...Array.from(set)];
+  }, [items]);
+
+  const mapPoints = useMemo(() => filtered, [filtered]);
+
+  const centerFallback = [47.49, 18.94]; // Budapest környéke fallback
 
   return (
-    <div className="page">
-      <header className="topbar">
+    <div className="app">
+      <div className="header">
         <div className="brand">
-          <div className="brand__title">EV Charging</div>
-          <div className="brand__sub">Térkép • Töltők • Indítás QR-rel (MVP)</div>
+          <h1>EV Charging</h1>
+          <p>Térkép • Töltők • Indítás QR-rel (MVP)</p>
         </div>
 
-        <div className="topbar__right">
-          <div className="pill">
-            <span className="muted">Ár:</span> {PRICE_HUF_PER_KWH} Ft/kWh
-          </div>
-          <div className="pill">
-            <span className="muted">Zárolás:</span> {PREAUTH_HUF} Ft
-          </div>
-          <button className="btn btn--ghost" onClick={load} disabled={loading}>
-            {loading ? "Frissítés…" : "Frissítés"}
+        <div className="pills">
+          <div className="pill">Ár: {PRICE_FT_PER_KWH} Ft/kWh</div>
+          <div className="pill">Zárolás: {HOLD_FT} Ft</div>
+          <button className="btn" onClick={refresh} disabled={loading}>
+            {loading ? "Frissítés..." : "Frissítés"}
           </button>
         </div>
-      </header>
+      </div>
 
-      <main className="layout">
-        <section className="mapCard">
-          <div className="mapCard__header">
+      <hr className="sep" />
+
+      <div className="grid">
+        {/* LEFT: Map */}
+        <div className="card">
+          <div className="cardHeader">
             <div>
-              <div className="h2">Térkép</div>
-              <div className="muted small">
-                Utolsó frissítés:{" "}
-                {lastUpdated ? lastUpdated.toLocaleString("hu-HU") : "—"}
-                {err ? <span className="error"> • Hiba: {err}</span> : null}
+              <div className="cardTitle">Térkép</div>
+              <div className="cardSub">
+                Utolsó frissítés: {lastUpdated ? lastUpdated.toLocaleString("hu-HU") : "—"}
               </div>
             </div>
-
-            <div className="mapCard__headerRight">
-              <div className="stat">
-                <div className="stat__k">Töltők</div>
-                <div className="stat__v">{items.length}</div>
+            <div className="kpis">
+              <div className="kpi">
+                <div className="label">Töltők</div>
+                <div className="val">{items.length}</div>
               </div>
-              <div className="stat">
-                <div className="stat__k">Szűrt</div>
-                <div className="stat__v">{filtered.length}</div>
+              <div className="kpi">
+                <div className="label">Szűrt</div>
+                <div className="val">{filtered.length}</div>
               </div>
             </div>
           </div>
 
-          <div className="mapWrap">
-            <MapContainer center={center} zoom={11} scrollWheelZoom className="map">
-              <TileLayer
-                attribution='&copy; OpenStreetMap'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
-              <FitToMarkers points={items} />
+          <div className="cardBody">
+            <div className="mapWrap">
+              <MapContainer center={centerFallback} zoom={12} scrollWheelZoom>
+                <TileLayer
+                  attribution='&copy; OpenStreetMap'
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                />
 
-              {filtered
-                .filter((cp) => typeof cp.latitude === "number" && typeof cp.longitude === "number")
-                .map((cp) => (
-                  <Marker
-                    key={cp.id}
-                    position={[cp.latitude, cp.longitude]}
-                    eventHandlers={{
-                      click: () => setSelectedId(cp.id),
-                    }}
-                  >
-                    <Popup>
-                      <div style={{ minWidth: 220 }}>
-                        <div style={{ fontWeight: 800 }}>{cp.ocpp_id}</div>
-                        <div className="small muted">{cp.location_name || "—"}</div>
-                        <div className="small muted">{cp.address_text || "—"}</div>
-                        <div style={{ marginTop: 8 }}>
-                          <span className={statusBadgeClass(cp.status)}>
-                            {cp.status || "unknown"}
-                          </span>
+                <FitToMarkers points={mapPoints} />
+
+                {mapPoints.map(cp => {
+                  if (typeof cp.latitude !== "number" || typeof cp.longitude !== "number") return null;
+                  return (
+                    <Marker
+                      key={cp.id}
+                      position={[cp.latitude, cp.longitude]}
+                      eventHandlers={{
+                        click: () => setSelectedId(cp.id),
+                      }}
+                    >
+                      <Popup>
+                        <div style={{ minWidth: 180 }}>
+                          <b>{cp.ocpp_id}</b>
+                          <div>{cp.location_name || "—"}</div>
+                          <div style={{ opacity: 0.8, fontSize: 12 }}>{cp.address_text || ""}</div>
+                          <div style={{ marginTop: 6 }}>
+                            státusz: <b>{cp.status}</b>
+                          </div>
                         </div>
-                      </div>
-                    </Popup>
-                  </Marker>
-                ))}
-            </MapContainer>
+                      </Popup>
+                    </Marker>
+                  );
+                })}
+              </MapContainer>
+            </div>
           </div>
-        </section>
+        </div>
 
-        <aside className="side">
+        {/* RIGHT: List + Details */}
+        <div className="rightCol">
           <div className="card">
-            <div className="card__title">Töltők</div>
-
-            <div className="controls">
-              <input
-                className="input"
-                placeholder="Keresés: ID / hely / cím…"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-              />
-
-              <div className="row">
-                <select
-                  className="select"
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                >
-                  <option value="all">Minden státusz</option>
-                  <option value="available">Available</option>
-                  <option value="charging">Charging</option>
-                  <option value="offline">Offline/Unavailable</option>
-                  <option value="error">Fault/Error</option>
-                </select>
-
+            <div className="cardHeader">
+              <div>
+                <div className="cardTitle">Töltők</div>
+                <div className="cardSub">Keresés + szűrés</div>
+              </div>
+            </div>
+            <div className="cardBody">
+              <div className="toolbar">
+                <input
+                  className="input"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Keresés: ID / hely / cím…"
+                />
                 <button
                   className="btn"
                   onClick={() => {
@@ -256,106 +199,106 @@ export default function App() {
                   Reset
                 </button>
               </div>
-            </div>
 
-            <div className="list">
-              {filtered.map((cp) => (
-                <button
-                  key={cp.id}
-                  className={"listItem " + (cp.id === selectedId ? "listItem--active" : "")}
-                  onClick={() => setSelectedId(cp.id)}
-                >
-                  <div className="listItem__top">
-                    <div className="listItem__id">{cp.ocpp_id}</div>
-                    <span className={statusBadgeClass(cp.status)}>{cp.status || "unknown"}</span>
+              <select
+                className="select"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+              >
+                {statuses.map(s => (
+                  <option key={s} value={s}>
+                    {s === "all" ? "Minden státusz" : s}
+                  </option>
+                ))}
+              </select>
+
+              <div style={{ height: 10 }} />
+
+              <div className="list">
+                {filtered.map(cp => (
+                  <div
+                    key={cp.id}
+                    className="item"
+                    onClick={() => setSelectedId(cp.id)}
+                    style={{
+                      outline: selected?.id === cp.id ? "2px solid rgba(59,130,246,0.35)" : "none"
+                    }}
+                  >
+                    <div className="itemTop">
+                      <div className="itemId">{cp.ocpp_id}</div>
+                      <div className="badge">{cp.status || "unknown"}</div>
+                    </div>
+                    <div className="itemMeta">
+                      {cp.location_name || "—"}
+                      <br />
+                      {cp.address_text || ""}
+                    </div>
                   </div>
-                  <div className="listItem__sub">{cp.location_name || "—"}</div>
-                  <div className="listItem__sub muted">{cp.address_text || "—"}</div>
-                </button>
-              ))}
-
-              {!loading && !filtered.length ? (
-                <div className="empty">Nincs találat.</div>
-              ) : null}
+                ))}
+              </div>
             </div>
           </div>
 
           <div className="card">
-            <div className="card__title">Kiválasztott töltő</div>
-
-            {selected ? (
-              <div className="detail">
-                <div className="detail__row">
-                  <div className="detail__k">OCPP ID</div>
-                  <div className="detail__v">{selected.ocpp_id}</div>
-                </div>
-
-                <div className="detail__row">
-                  <div className="detail__k">Hely</div>
-                  <div className="detail__v">{selected.location_name || "—"}</div>
-                </div>
-
-                <div className="detail__row">
-                  <div className="detail__k">Cím</div>
-                  <div className="detail__v">{selected.address_text || "—"}</div>
-                </div>
-
-                <div className="detail__row">
-                  <div className="detail__k">Státusz</div>
-                  <div className="detail__v">
-                    <span className={statusBadgeClass(selected.status)}>
-                      {selected.status || "unknown"}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="detail__row">
-                  <div className="detail__k">Utoljára látva</div>
-                  <div className="detail__v">{fmtDateTime(selected.last_seen_at)}</div>
-                </div>
-
-                <div className="divider" />
-
-                <div className="actions">
-                  <button
-                    className="btn btn--primary"
-                    onClick={() => alert("MVP: itt jön majd a QR / fizetés / Start flow")}
-                  >
-                    Töltés indítása (QR)
-                  </button>
-
-                  <button
-                    className="btn btn--ghost"
-                    onClick={() => {
-                      const lat = selected.latitude;
-                      const lon = selected.longitude;
-                      if (typeof lat === "number" && typeof lon === "number") {
-                        window.open(`https://www.google.com/maps?q=${lat},${lon}`, "_blank");
-                      } else {
-                        alert("Nincs koordináta ehhez a töltőhöz.");
-                      }
-                    }}
-                  >
-                    Megnyitás Google Maps-ben
-                  </button>
-                </div>
-
-                <div className="hint">
-                  Tipp: a “Start” gomb mögé később megy a zárolás (5000 Ft), majd a RemoteStartTransaction.
-                </div>
+            <div className="cardHeader">
+              <div>
+                <div className="cardTitle">Kiválasztott töltő</div>
+                <div className="cardSub">Indítás QR-rel / később fizetés</div>
               </div>
-            ) : (
-              <div className="empty">Válassz ki egy töltőt a listából.</div>
-            )}
-          </div>
-        </aside>
-      </main>
+            </div>
 
-      <footer className="footer">
-        <span className="muted small">
-          MVP • térkép + lista • QR indítás + fizetés jön (SimplePay/Stripe).
-        </span>
-      </footer>
+            <div className="cardBody">
+              {!selected ? (
+                <div style={{ color: "var(--muted)" }}>Nincs kiválasztott töltő.</div>
+              ) : (
+                <>
+                  <div className="detailGrid">
+                    <div className="key">OCPP ID</div>
+                    <div className="val"><b>{selected.ocpp_id}</b></div>
+
+                    <div className="key">Hely</div>
+                    <div className="val">{selected.location_name || "—"}</div>
+
+                    <div className="key">Cím</div>
+                    <div className="val">{selected.address_text || "—"}</div>
+
+                    <div className="key">Státusz</div>
+                    <div className="val"><span className="badge">{selected.status || "unknown"}</span></div>
+
+                    <div className="key">Utoljára látva</div>
+                    <div className="val">{formatHu(selected.last_seen_at)}</div>
+                  </div>
+
+                  <div className="actions">
+                    <button className="btn btnPrimary">
+                      Töltés indítása (QR)
+                    </button>
+
+                    <button
+                      className="btn btnGhost"
+                      onClick={() => {
+                        if (typeof selected.latitude !== "number" || typeof selected.longitude !== "number") return;
+                        const url = `https://www.google.com/maps?q=${selected.latitude},${selected.longitude}`;
+                        window.open(url, "_blank");
+                      }}
+                    >
+                      Megnyitás Google Maps-ben
+                    </button>
+                  </div>
+
+                  <div className="footerNote">
+                    Tipp: a “Start” gomb mögé később megy a zárolás (5000 Ft), majd a RemoteStartTransaction.
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="smallFooter">
+            MVP • térkép + lista • QR indítás + fizetés jön (SimplePay/Stripe).
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
