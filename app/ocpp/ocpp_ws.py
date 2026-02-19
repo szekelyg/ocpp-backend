@@ -194,14 +194,34 @@ async def save_status_notification(cp_id: str, payload: dict) -> None:
     { connectorId, status, errorCode, timestamp }
     """
     try:
-        st = _normalize_cp_status(payload.get("status"))
+        incoming = _normalize_cp_status(payload.get("status"))
 
         async with AsyncSessionLocal() as session:
-            cp = (await session.execute(select(ChargePoint).where(ChargePoint.ocpp_id == cp_id))).scalar_one_or_none()
+            cp = (
+                await session.execute(select(ChargePoint).where(ChargePoint.ocpp_id == cp_id))
+            ).scalar_one_or_none()
             if not cp:
                 return
-            cp.status = st
+
             cp.last_seen_at = utcnow()
+
+            # Ha van aktív session, ne engedjük, hogy "available" felülírja a chargingot
+            active = (
+                await session.execute(
+                    select(ChargeSession.id).where(
+                        and_(
+                            ChargeSession.charge_point_id == cp.id,
+                            ChargeSession.finished_at.is_(None),
+                        )
+                    ).limit(1)
+                )
+            ).first()
+
+            if active and incoming == "available":
+                await session.commit()
+                return
+
+            cp.status = incoming
             await session.commit()
 
     except Exception as e:
@@ -393,10 +413,6 @@ async def stop_transaction(cp_id: str, payload: dict) -> None:
 # ======================================================================================
 
 async def save_meter_values(cp_id: str, payload: dict) -> None:
-    """
-    payload tipikusan:
-    { connectorId, transactionId?, meterValue:[{timestamp, sampledValue:[...]}] }
-    """
     try:
         connector_id = _as_int(payload.get("connectorId"))
         transaction_id = payload.get("transactionId")
@@ -411,14 +427,15 @@ async def save_meter_values(cp_id: str, payload: dict) -> None:
                 logger.warning(f"MeterValues: nincs ilyen CP: {cp_id}")
                 return
 
-            # 1) tx alapján (ha van)
             active_session_id = await find_session_id_by_tx(session, cp.id, transaction_id)
-
-            # 2) fallback connector alapján
             if active_session_id is None:
                 active_session_id = await find_active_session_id(session, cp.id, connector_id)
 
             now_dt = utcnow()
+
+            last_pw = 0.0
+            last_ia = 0.0
+
             for mv in meter_values:
                 if not isinstance(mv, dict):
                     continue
@@ -428,19 +445,30 @@ async def save_meter_values(cp_id: str, payload: dict) -> None:
                 if not isinstance(sampled, list):
                     sampled = []
 
+                pw = _pick_measurand_sum(sampled, "Power.Active.Import") or 0.0
+                ia = _pick_measurand_sum(sampled, "Current.Import") or 0.0
+
+                last_pw = pw
+                last_ia = ia
+
                 sample = MeterSample(
                     charge_point_id=cp.id,
                     session_id=active_session_id,
                     connector_id=connector_id,
                     ts=ts,
                     energy_wh_total=_pick_measurand_sum(sampled, "Energy.Active.Import.Register"),
-                    power_w=_pick_measurand_sum(sampled, "Power.Active.Import"),
-                    current_a=_pick_measurand_sum(sampled, "Current.Import"),
+                    power_w=pw,
+                    current_a=ia,
                     created_at=now_dt,
                 )
                 session.add(sample)
 
             cp.last_seen_at = now_dt
+
+            # státusz frissítés még commit előtt
+            if last_pw > 10 or last_ia > 0.1:
+                cp.status = "charging"
+
             await session.commit()
 
             logger.info(
