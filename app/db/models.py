@@ -10,13 +10,35 @@ def utcnow():
     return datetime.now(timezone.utc)
 
 
+class Location(Base):
+    __tablename__ = "locations"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
+
+    name = Column(String(255), nullable=False)
+    address_text = Column(String(512), nullable=True)
+
+    # DB-ben numeric(9,6), itt Float-tal kényelmesen kezeljük
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+    charge_points = relationship("ChargePoint", back_populates="location")
+
+
 class ChargePoint(Base):
     __tablename__ = "charge_points"
 
     id = Column(Integer, primary_key=True, index=True)
 
     organization_id = Column(Integer, nullable=True)
-    location_id = Column(Integer, nullable=True)
+
+    # FONTOS: legyen FK, hogy lehessen relationship
+    location_id = Column(Integer, ForeignKey("locations.id", ondelete="SET NULL"), nullable=True)
 
     # OCPP azonosító (path-ban használjuk, pl. VLTHU001B)
     ocpp_id = Column(String, unique=True, index=True, nullable=False)
@@ -31,6 +53,9 @@ class ChargePoint(Base):
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+    # kapcsolatok
+    location = relationship("Location", back_populates="charge_points")
 
     sessions = relationship(
         "ChargeSession",
@@ -96,4 +121,3 @@ class MeterSample(Base):
 
     charge_point = relationship("ChargePoint", back_populates="samples")
     session = relationship("ChargeSession", back_populates="samples")
-    
