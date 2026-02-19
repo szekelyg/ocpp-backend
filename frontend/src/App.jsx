@@ -8,7 +8,7 @@ import {
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import "./App.css";
+
 
 // Fix Leaflet marker icon paths (Vite alatt gyakran “eltűnik”)
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
