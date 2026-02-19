@@ -105,20 +105,42 @@ class VoltieLikeSimulator:
         self.ws = None
         self._stop = asyncio.Event()
 
+        # uid -> action (hogy tudjuk, melyik válasz mire jött)
+        self._pending: Dict[str, str] = {}
+
     def next_id(self) -> str:
         self._msg_counter += 1
         return str(self._msg_counter)
 
-    async def send_call(self, action: str, payload: Dict[str, Any]) -> None:
+    async def send_call(self, action: str, payload: Dict[str, Any]) -> str:
         uid = self.next_id()
+        self._pending[uid] = action
         msg = ocpp_call(uid, action, payload)
         await self.ws.send(json.dumps(msg))
         print(f">> {action} ({uid})")
+        return uid
 
     async def recv_loop(self) -> None:
         try:
             async for raw in self.ws:
                 print(f"<< {raw}")
+                try:
+                    msg = json.loads(raw)
+                except Exception:
+                    continue
+
+                # CALLRESULT: [3, uniqueId, payload]
+                if isinstance(msg, list) and len(msg) >= 3 and msg[0] == 3:
+                    uid = msg[1]
+                    payload = msg[2] if isinstance(msg[2], dict) else {}
+                    action = self._pending.pop(uid, None)
+
+                    if action == "StartTransaction":
+                        txid = payload.get("transactionId")
+                        if isinstance(txid, int) and txid > 0:
+                            self.state.transaction_id = txid
+                            print(f"[SIM] transactionId beállítva a válaszból: {self.state.transaction_id}")
+
         except Exception as e:
             print(f"[recv_loop] vége: {e}")
         finally:
@@ -158,14 +180,15 @@ class VoltieLikeSimulator:
             "meterStart": self.state.get_energy_wh(),
         }
         await self.send_call("StartTransaction", payload)
-        print("[SIM] StartTransaction elküldve")
-
-        # egyszerű: transactionId = 1 (backend úgyis felülírja)
-        self.state.transaction_id = 1
+        print("[SIM] StartTransaction elküldve (txId a válaszból jön)")
 
     async def send_stop_transaction(self):
+        if not self.state.transaction_id:
+            print("[SIM] Nincs transaction_id, nem küldök StopTransaction-t.")
+            return
+
         payload = {
-            "transactionId": self.state.transaction_id or 1,
+            "transactionId": self.state.transaction_id,
             "timestamp": iso_utc_offset(),
             "meterStop": self.state.get_energy_wh(),
             "reason": "Local",
@@ -193,13 +216,19 @@ class VoltieLikeSimulator:
              "value": str(p["total"]), "context": "Sample.Clock"},
         ]
 
-        return {
-            "connectorId": 0,
+        payload: Dict[str, Any] = {
+            "connectorId": 0,  # Voltie-szerű: 0
             "meterValue": [{
                 "sampledValue": sampled,
                 "timestamp": iso_utc_offset(ts_minute),
             }]
         }
+
+        # töltés közben a legjobb, ha küldünk transactionId-t is
+        if self.state.charging and self.state.transaction_id:
+            payload["transactionId"] = self.state.transaction_id
+
+        return payload
 
     async def meter_values_task(self) -> None:
         while not self._stop.is_set():
@@ -251,7 +280,7 @@ class VoltieLikeSimulator:
                 })
 
             elif cmd == "status":
-                print(f"charging={self.state.charging} energy={self.state.get_energy_wh()} Wh")
+                print(f"charging={self.state.charging} tx={self.state.transaction_id} energy={self.state.get_energy_wh()} Wh")
 
             elif cmd in ("quit", "exit"):
                 self._stop.set()

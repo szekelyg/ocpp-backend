@@ -200,6 +200,25 @@ async def find_active_session_id(session, cp_db_id: int, connector_id: Optional[
     return int(row[0]) if row else None
 
 
+async def find_session_id_by_tx(session, cp_db_id: int, transaction_id: Any) -> Optional[int]:
+    if transaction_id is None:
+        return None
+    tx = str(transaction_id)
+    res = await session.execute(
+        select(ChargeSession.id)
+        .where(
+            and_(
+                ChargeSession.charge_point_id == cp_db_id,
+                ChargeSession.ocpp_transaction_id == tx,
+                ChargeSession.finished_at.is_(None),
+            )
+        )
+        .limit(1)
+    )
+    row = res.first()
+    return int(row[0]) if row else None
+
+
 # ---------- Transaction handlers ----------
 
 async def start_transaction(cp_id: str, payload: dict) -> Optional[int]:
@@ -231,10 +250,12 @@ async def start_transaction(cp_id: str, payload: dict) -> Optional[int]:
             session.add(cs)
             await session.flush()  # cs.id
 
+            # nálunk a CSMS által kiosztott transactionId = session id
             cs.ocpp_transaction_id = str(cs.id)
-            cp.last_seen_at = utcnow()
 
+            cp.last_seen_at = utcnow()
             await session.commit()
+
             logger.info(f"Session indítva: id={cs.id} cp={cp_id} connector={connector_id}")
             return cs.id
 
@@ -259,6 +280,10 @@ async def stop_transaction(cp_id: str, payload: dict) -> None:
                 logger.warning(f"StopTransaction: nincs ilyen CP: {cp_id}")
                 return
 
+            if transaction_id is None:
+                logger.warning(f"StopTransaction: nincs transactionId cp={cp_id}")
+                return
+
             res = await session.execute(
                 select(ChargeSession)
                 .options(selectinload(ChargeSession.samples))
@@ -266,25 +291,23 @@ async def stop_transaction(cp_id: str, payload: dict) -> None:
                     and_(
                         ChargeSession.charge_point_id == cp.id,
                         ChargeSession.ocpp_transaction_id == str(transaction_id),
+                        ChargeSession.finished_at.is_(None),  # <-- fontos!
                     )
                 )
                 .limit(1)
             )
             cs = res.scalar_one_or_none()
             if not cs:
-                logger.warning(f"StopTransaction: nincs ilyen session tx={transaction_id} cp={cp_id}")
+                logger.warning(f"StopTransaction: nincs nyitott session tx={transaction_id} cp={cp_id}")
                 return
 
             cs.finished_at = ts
 
-            # energia számítás (robosztus):
-            # 1) ha vannak session-hez kötött minták: első/utolsó energy_wh_total
-            # 2) ha nincs: próbáljuk meterStop - (session első mintája nélküli) -> nem tudunk különbséget, marad None
-            # Megjegyzés: ha a szimulátor küld meterStart-ot is, akkor érdemes majd eltárolni cs-ben (külön oszlop).
+            # energia számítás:
+            # első/utolsó energy_wh_total a session-hez kötött mintákból, fallback meterStop-ra
             first_wh = None
             last_wh = None
 
-            # a session-hez kötött minták biztos sorrendben:
             samples = sorted([s for s in (cs.samples or []) if s.energy_wh_total is not None], key=lambda x: x.ts)
             if samples:
                 first_wh = float(samples[0].energy_wh_total)
@@ -308,10 +331,12 @@ async def stop_transaction(cp_id: str, payload: dict) -> None:
 
 async def save_meter_values(cp_id: str, payload: dict) -> None:
     """
-    payload: { connectorId, meterValue: [ { timestamp, sampledValue:[...]} ] }
+    payload tipikusan:
+    { connectorId, transactionId?, meterValue:[{timestamp, sampledValue:[...]}] }
     """
     try:
         connector_id = _as_int(payload.get("connectorId"))
+        transaction_id = payload.get("transactionId")
         meter_values = payload.get("meterValue")
 
         if not isinstance(meter_values, list) or not meter_values:
@@ -323,7 +348,12 @@ async def save_meter_values(cp_id: str, payload: dict) -> None:
                 logger.warning(f"MeterValues: nincs ilyen CP: {cp_id}")
                 return
 
-            active_session_id = await find_active_session_id(session, cp.id, connector_id)
+            # 1) ha van transactionId, az a legjobb
+            active_session_id = await find_session_id_by_tx(session, cp.id, transaction_id)
+
+            # 2) fallback (ha nincs tx)
+            if active_session_id is None:
+                active_session_id = await find_active_session_id(session, cp.id, connector_id)
 
             now_dt = utcnow()
             for mv in meter_values:
@@ -337,7 +367,7 @@ async def save_meter_values(cp_id: str, payload: dict) -> None:
 
                 sample = MeterSample(
                     charge_point_id=cp.id,
-                    session_id=active_session_id,  # <-- EZ A LÉNYEG
+                    session_id=active_session_id,
                     connector_id=connector_id,
                     ts=ts,
                     energy_wh_total=_pick_measurand_sum(sampled, "Energy.Active.Import.Register"),
@@ -351,7 +381,7 @@ async def save_meter_values(cp_id: str, payload: dict) -> None:
             await session.commit()
 
             logger.info(
-                f"MeterValues mentve: cp={cp_id} connector={connector_id} session_id={active_session_id} count={len(meter_values)}"
+                f"MeterValues mentve: cp={cp_id} connector={connector_id} tx={transaction_id} session_id={active_session_id} count={len(meter_values)}"
             )
 
     except Exception as e:
@@ -400,7 +430,6 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
                     logger.warning("Nem tudtam ChargePoint ID-t kinyerni BootNotificationből")
 
             if not cp_id:
-                # ha nincs CP azonosító, akkor sem állunk meg, csak ACK safe default
                 await ws.send_text(json.dumps([3, msg_id, {}]))
                 continue
 
