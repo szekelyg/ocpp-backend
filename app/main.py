@@ -1,7 +1,7 @@
 import logging
 
-from fastapi import FastAPI, Depends
-from fastapi import WebSocket
+from fastapi import FastAPI, Depends, WebSocket
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
@@ -38,8 +38,13 @@ async def ocpp_with_id(ws: WebSocket, charge_point_id: str):
     logger.info(f"OCPP kapcsolat érkezett path=/ocpp/{charge_point_id}, ID={charge_point_id}")
     await handle_ocpp(ws, charge_point_id)
 
+
 # OCPP WebSocket endpoint – ha nincs ID a path-ban
 @app.websocket("/ocpp")
 async def ocpp_no_id(ws: WebSocket):
     logger.info("OCPP kapcsolat érkezett path=/ocpp (nincs ID a path-ban)")
     await handle_ocpp(ws, None)
+
+
+# Frontend (React build) – TEDD A VÉGÉRE
+app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="frontend")
