@@ -46,14 +46,21 @@ def ocpp_call(unique_id: str, action: str, payload: Dict[str, Any]) -> List[Any]
 class SimState:
     cp_id: str
     connector_id: int = 0
-    charging: bool = False
+
+    plugged: bool = False      # <-- bedugva
+    charging: bool = False     # <-- ténylegesen tölt
 
     power_w: int = 11000
     energy_wh_total: float = 7146314.0
 
     last_energy_update: datetime = now_utc()
-
     transaction_id: Optional[int] = None
+
+    def set_plugged(self, on: bool) -> None:
+        # ha kihúzzuk, akkor töltés is off + tx reset (StopTransaction-t külön küldjük a logikában)
+        self.plugged = on
+        if not on:
+            self.charging = False
 
     def set_charging(self, on: bool) -> None:
         self._update_energy()
@@ -80,7 +87,6 @@ class SimState:
 
         i = self.power_w / (math.sqrt(3) * 400.0)
         i = round(i, 2)
-
         return {"total": i, "l1": i, "l2": i, "l3": i}
 
     def get_powers(self) -> Dict[str, int]:
@@ -88,8 +94,15 @@ class SimState:
             return {"total": 0, "l1": 0, "l2": 0, "l3": 0}
 
         per = int(round(self.power_w / 3))
-
         return {"total": self.power_w, "l1": per, "l2": per, "l3": per}
+
+    def ocpp_status(self) -> str:
+        # “bedugva, de nem tölt” -> Preparing
+        if self.charging:
+            return "Charging"
+        if self.plugged:
+            return "Preparing"
+        return "Available"
 
 
 # ---------------- Simulator ----------------
@@ -162,13 +175,23 @@ class VoltieLikeSimulator:
         await asyncio.sleep(0.2)
         await self.send_call("StatusNotification", {
             "connectorId": 1,
-            "status": "Available",
+            "status": self.state.ocpp_status(),
             "errorCode": "NoError",
             "timestamp": iso_utc_offset(),
         })
 
         await asyncio.sleep(0.2)
         await self.send_call("FirmwareStatusNotification", {"status": "Installed"})
+
+    # ---------------- Status helper ----------------
+
+    async def send_status(self) -> None:
+        await self.send_call("StatusNotification", {
+            "connectorId": 1,
+            "status": self.state.ocpp_status(),
+            "errorCode": "NoError",
+            "timestamp": iso_utc_offset(),
+        })
 
     # ---------------- Transaction ----------------
 
@@ -224,7 +247,7 @@ class VoltieLikeSimulator:
             }]
         }
 
-        # töltés közben a legjobb, ha küldünk transactionId-t is
+        # töltés közben küldünk transactionId-t
         if self.state.charging and self.state.transaction_id:
             payload["transactionId"] = self.state.transaction_id
 
@@ -234,7 +257,6 @@ class VoltieLikeSimulator:
         while not self._stop.is_set():
             now = now_utc()
             nxt = next_minute_boundary(now)
-
             await asyncio.sleep(max(0.1, (nxt - now).total_seconds()))
 
             ts = floor_to_minute(now_utc())
@@ -249,38 +271,54 @@ class VoltieLikeSimulator:
     # ---------------- CLI ----------------
 
     async def cli_task(self) -> None:
-        print("\nParancsok: start | stop | status | quit\n")
+        print("\nParancsok: plug | unplug | start | stop | status | quit\n")
 
         loop = asyncio.get_running_loop()
 
         while not self._stop.is_set():
             cmd = await loop.run_in_executor(None, input, "sim> ")
-            cmd = cmd.strip()
+            cmd = cmd.strip().lower()
 
-            if cmd == "start":
+            if cmd == "plug":
+                # bedugjuk, de még nem tölt
+                self.state.set_plugged(True)
+                self.state.set_charging(False)
+                await self.send_status()
+                print("[SIM] bedugva (Preparing)")
+
+            elif cmd == "unplug":
+                # ha ment töltés, előbb állítsuk le a tranzakciót
+                if self.state.transaction_id:
+                    self.state.set_charging(False)
+                    await self.send_stop_transaction()
+                self.state.set_plugged(False)
+                await self.send_status()
+                print("[SIM] kihúzva (Available)")
+
+            elif cmd == "start":
+                # csak bedugva indulhat
+                if not self.state.plugged:
+                    print("[SIM] Előbb plug (bedugás), utána start.")
+                    continue
+
                 self.state.set_charging(True)
                 await self.send_start_transaction()
-
-                await self.send_call("StatusNotification", {
-                    "connectorId": 1,
-                    "status": "Charging",
-                    "errorCode": "NoError",
-                    "timestamp": iso_utc_offset(),
-                })
+                await self.send_status()
+                print("[SIM] töltés indul (Charging)")
 
             elif cmd == "stop":
+                # stop: töltés leáll, de marad bedugva -> Preparing
                 self.state.set_charging(False)
                 await self.send_stop_transaction()
-
-                await self.send_call("StatusNotification", {
-                    "connectorId": 1,
-                    "status": "Available",
-                    "errorCode": "NoError",
-                    "timestamp": iso_utc_offset(),
-                })
+                await self.send_status()
+                print("[SIM] töltés leáll (Preparing)")
 
             elif cmd == "status":
-                print(f"charging={self.state.charging} tx={self.state.transaction_id} energy={self.state.get_energy_wh()} Wh")
+                print(
+                    f"plugged={self.state.plugged} charging={self.state.charging} "
+                    f"tx={self.state.transaction_id} energy={self.state.get_energy_wh()} Wh "
+                    f"ocpp={self.state.ocpp_status()}"
+                )
 
             elif cmd in ("quit", "exit"):
                 self._stop.set()
