@@ -51,6 +51,44 @@ function placeLines(cp) {
   return [a, b];
 }
 
+/** OCPP status -> “emberi” státusz (HU) */
+function statusUi(statusRaw) {
+  const s = (statusRaw || "").toString().trim().toLowerCase();
+
+  // MVP: finishing/preparing nálad sokszor = “bedugva, de nem tölt”
+  // ezért ne ijesztgessük “befejezés”-sel.
+  const map = {
+    charging: { label: "Tölt", tone: "good", hint: "charging" },
+    available: { label: "Szabad", tone: "ok", hint: "available" },
+    preparing: { label: "Csatlakoztatva", tone: "warn", hint: "preparing" },
+    finishing: { label: "Csatlakoztatva", tone: "warn", hint: "finishing" },
+    suspendedev: { label: "Szünetel (EV)", tone: "warn", hint: "suspendedEV" },
+    suspendedevse: { label: "Szünetel (állomás)", tone: "warn", hint: "suspendedEVSE" },
+    unavailable: { label: "Nem elérhető", tone: "bad", hint: "unavailable" },
+    faulted: { label: "Hibás", tone: "bad", hint: "faulted" },
+    reserved: { label: "Foglalt", tone: "warn", hint: "reserved" },
+  };
+
+  if (!s) return { label: "Ismeretlen", tone: "muted", hint: "—" };
+  return map[s] || { label: "Ismeretlen", tone: "muted", hint: s };
+}
+
+/** tone -> css class */
+function badgeClass(tone) {
+  switch (tone) {
+    case "good":
+      return "badge badgeGood";
+    case "warn":
+      return "badge badgeWarn";
+    case "bad":
+      return "badge badgeBad";
+    case "ok":
+      return "badge badgeOk";
+    default:
+      return "badge badgeMuted";
+  }
+}
+
 export default function App() {
   const PRICE_FT_PER_KWH = 1;
   const HOLD_FT = 5000;
@@ -83,10 +121,12 @@ export default function App() {
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     return items.filter((cp) => {
+      const raw = (cp.status || "").toLowerCase();
+
       const okStatus =
         statusFilter === "all"
           ? true
-          : (cp.status || "").toLowerCase() === statusFilter;
+          : raw === statusFilter;
 
       const hay = `${cp.ocpp_id || ""} ${cp.location_name || ""} ${cp.address_text || ""}`.toLowerCase();
       const okQ = s ? hay.includes(s) : true;
@@ -165,24 +205,34 @@ export default function App() {
                   if (typeof cp.latitude !== "number" || typeof cp.longitude !== "number") return null;
 
                   const lines = placeLines(cp);
+                  const ui = statusUi(cp.status);
 
                   return (
                     <Marker
                       key={cp.id}
                       position={[cp.latitude, cp.longitude]}
-                      eventHandlers={{
-                        click: () => setSelectedId(cp.id),
-                      }}
+                      eventHandlers={{ click: () => setSelectedId(cp.id) }}
                     >
                       <Popup>
-                        <div style={{ minWidth: 180 }}>
-                          <b>{cp.ocpp_id}</b>
-                          <div>{lines[0]}</div>
+                        <div style={{ minWidth: 220 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                            <b>{cp.ocpp_id}</b>
+                            <span className={badgeClass(ui.tone)} title={`OCPP: ${ui.hint}`}>
+                              {ui.label}
+                            </span>
+                          </div>
+
+                          <div style={{ marginTop: 6 }}>{lines[0]}</div>
                           {lines[1] ? (
                             <div style={{ opacity: 0.8, fontSize: 12 }}>{lines[1]}</div>
                           ) : null}
-                          <div style={{ marginTop: 6 }}>
-                            státusz: <b>{cp.status}</b>
+
+                          <div style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
+                            OCPP státusz: <b>{(cp.status || "—").toString()}</b>
+                          </div>
+
+                          <div style={{ marginTop: 6, fontSize: 12, opacity: 0.85 }}>
+                            Utoljára látva: <b>{formatHu(cp.last_seen_at)}</b>
                           </div>
                         </div>
                       </Popup>
@@ -238,6 +288,8 @@ export default function App() {
               <div className="list">
                 {filtered.map((cp) => {
                   const lines = placeLines(cp);
+                  const ui = statusUi(cp.status);
+
                   return (
                     <div
                       key={cp.id}
@@ -249,8 +301,11 @@ export default function App() {
                     >
                       <div className="itemTop">
                         <div className="itemId">{cp.ocpp_id}</div>
-                        <div className="badge">{cp.status || "unknown"}</div>
+                        <span className={badgeClass(ui.tone)} title={`OCPP: ${ui.hint}`}>
+                          {ui.label}
+                        </span>
                       </div>
+
                       <div className="itemMeta">
                         {lines[0]}
                         {lines[1] ? (
@@ -259,6 +314,10 @@ export default function App() {
                             {lines[1]}
                           </>
                         ) : null}
+                      </div>
+
+                      <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
+                        Utoljára: {formatHu(cp.last_seen_at)}
                       </div>
                     </div>
                   );
@@ -279,52 +338,63 @@ export default function App() {
               {!selected ? (
                 <div style={{ color: "var(--muted)" }}>Nincs kiválasztott töltő.</div>
               ) : (
-                <>
-                  <div className="detailGrid">
-                    <div className="key">OCPP ID</div>
-                    <div className="val">
-                      <b>{selected.ocpp_id}</b>
-                    </div>
+                (() => {
+                  const ui = statusUi(selected.status);
+                  const lines = placeLines(selected);
+                  return (
+                    <>
+                      <div className="detailGrid">
+                        <div className="key">OCPP ID</div>
+                        <div className="val">
+                          <b>{selected.ocpp_id}</b>
+                        </div>
 
-                    <div className="key">Hely</div>
-                    <div className="val">{placeLines(selected)[0] || "—"}</div>
+                        <div className="key">Hely</div>
+                        <div className="val">{lines[0] || "—"}</div>
 
-                    <div className="key">Cím</div>
-                    <div className="val">{placeLines(selected)[1] || "—"}</div>
+                        <div className="key">Cím</div>
+                        <div className="val">{lines[1] || "—"}</div>
 
-                    <div className="key">Státusz</div>
-                    <div className="val">
-                      <span className="badge">{selected.status || "unknown"}</span>
-                    </div>
+                        <div className="key">Státusz</div>
+                        <div className="val" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span className={badgeClass(ui.tone)} title={`OCPP: ${ui.hint}`}>
+                            {ui.label}
+                          </span>
+                          <span style={{ fontSize: 12, opacity: 0.8 }}>
+                            (OCPP: <b>{(selected.status || "—").toString()}</b>)
+                          </span>
+                        </div>
 
-                    <div className="key">Utoljára látva</div>
-                    <div className="val">{formatHu(selected.last_seen_at)}</div>
-                  </div>
+                        <div className="key">Utoljára látva</div>
+                        <div className="val">{formatHu(selected.last_seen_at)}</div>
+                      </div>
 
-                  <div className="actions">
-                    <button className="btn btnPrimary">Töltés indítása (QR)</button>
+                      <div className="actions">
+                        <button className="btn btnPrimary">Töltés indítása (QR)</button>
 
-                    <button
-                      className="btn btnGhost"
-                      onClick={() => {
-                        if (typeof selected.latitude !== "number" || typeof selected.longitude !== "number") return;
-                        const url = `https://www.google.com/maps?q=${selected.latitude},${selected.longitude}`;
-                        window.open(url, "_blank");
-                      }}
-                    >
-                      Megnyitás Google Maps-ben
-                    </button>
-                  </div>
+                        <button
+                          className="btn btnGhost"
+                          onClick={() => {
+                            if (typeof selected.latitude !== "number" || typeof selected.longitude !== "number") return;
+                            const url = `https://www.google.com/maps?q=${selected.latitude},${selected.longitude}`;
+                            window.open(url, "_blank");
+                          }}
+                        >
+                          Megnyitás Google Maps-ben
+                        </button>
+                      </div>
 
-                  <div className="footerNote">
-                    Tipp: a “Start” gomb mögé később megy a zárolás (5000 Ft), majd a RemoteStartTransaction.
-                  </div>
-                </>
+                      <div className="footerNote">
+                        Tipp: a “Start” gomb mögé később megy a zárolás (5000 Ft), majd a RemoteStartTransaction.
+                      </div>
+                    </>
+                  );
+                })()
               )}
             </div>
           </div>
 
-          <div className="smallFooter">MVP • térkép + lista • QR indítás + fizetés jön (SimplePay/Stripe).</div>
+          <div className="smallFooter">MVP • térkép + lista • QR indítás + fizetés jön.</div>
         </div>
       </div>
     </div>
