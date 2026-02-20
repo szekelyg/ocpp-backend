@@ -173,25 +173,28 @@ class VoltieLikeSimulator:
         await self.send_call("BootNotification", boot_payload)
 
         await asyncio.sleep(0.2)
-        await self.send_call("StatusNotification", {
-            "connectorId": 1,
-            "status": self.state.ocpp_status(),
-            "errorCode": "NoError",
-            "timestamp": iso_utc_offset(),
-        })
+        for cid in (0, 1):
+            await self.send_call("StatusNotification", {
+                "connectorId": cid,
+                "status": st,
+                "errorCode": "NoError",
+                "timestamp": iso_utc_offset(),
+            })
 
         await asyncio.sleep(0.2)
         await self.send_call("FirmwareStatusNotification", {"status": "Installed"})
 
     # ---------------- Status helper ----------------
 
-    async def send_status(self) -> None:
-        await self.send_call("StatusNotification", {
-            "connectorId": 1,
-            "status": self.state.ocpp_status(),
-            "errorCode": "NoError",
-            "timestamp": iso_utc_offset(),
-        })
+    async def send_status(st: str):
+        # VOLTIE-szerűen küldjük 0-ra és 1-re is
+        for cid in (0, 1):
+            await self.send_call("StatusNotification", {
+                "connectorId": cid,
+                "status": st,
+                "errorCode": "NoError",
+                "timestamp": iso_utc_offset(),
+            })
 
     # ---------------- Transaction ----------------
 
