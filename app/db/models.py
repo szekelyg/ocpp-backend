@@ -84,7 +84,11 @@ class ChargeSession(Base):
     started_at = Column(DateTime(timezone=True), nullable=False)
     finished_at = Column(DateTime(timezone=True), nullable=True)
 
-    # később ezek számolhatóak meter sample-ből is, de jó ha van "összegzett" mező
+    # ÚJ: StartTransaction.meterStart / StopTransaction.meterStop (Wh)
+    meter_start_wh = Column(Float, nullable=True)
+    meter_stop_wh = Column(Float, nullable=True)
+
+    # összegzett
     energy_kwh = Column(Float, nullable=True)
     cost_huf = Column(Float, nullable=True)
 
