@@ -75,7 +75,7 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
                     "price_data": {
                         "currency": "huf",
                         "product_data": {"name": "EV charging hold (deposit)"},
-                        "unit_amount": int(body.hold_amount_huf),
+                        "unit_amount": int(body.hold_amount_huf) * 100,
                     },
                     "quantity": 1,
                 }

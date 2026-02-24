@@ -28,6 +28,10 @@ def upgrade() -> None:
     op.add_column("charging_intents", sa.Column("cancelled_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("charging_intents", sa.Column("expired_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("charging_intents", sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True))
+    op.add_column("charging_intents", sa.Column("payment_provider_ref", sa.String(length=255), nullable=True))
+    op.add_column("charging_intents", sa.Column("cancel_reason", sa.String(length=255), nullable=True))
+    op.add_column("charging_intents", sa.Column("last_error", sa.Text(), nullable=True))
+
 
     # 2) stripe specifikus régi oszlop -> új név (csak ha a régi létezik és az új nem)
     # Postgres safe: DO blokkal lekérdezzük az oszlopokat.
@@ -137,3 +141,6 @@ def downgrade() -> None:
     op.drop_column("charging_intents", "currency")
     op.drop_column("charging_intents", "payment_status")
     op.drop_column("charging_intents", "payment_provider")
+    op.drop_column("charging_intents", "last_error")
+    op.drop_column("charging_intents", "cancel_reason")
+    op.drop_column("charging_intents", "payment_provider_ref")
