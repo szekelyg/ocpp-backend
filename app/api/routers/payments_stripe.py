@@ -15,6 +15,10 @@ logger = logging.getLogger("payments.stripe")
 
 router = APIRouter(prefix="/payments/stripe", tags=["payments"])
 
+@router.get("/health")
+async def health():
+    return {"ok": True, "service": "stripe"}
+
 
 def _get_env(name: str) -> str:
     v = os.environ.get(name)
