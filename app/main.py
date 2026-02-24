@@ -9,6 +9,9 @@ from app.api.deps import get_db
 from app.api.routers.charge_points import router as charge_points_router
 from app.api.routers.sessions import router as sessions_router
 from app.ocpp.ocpp_ws import handle_ocpp
+from app.api.routers.payments_stripe import router as payments_stripe_router
+
+
 
 logger = logging.getLogger("backend")
 logging.basicConfig(level=logging.INFO)
@@ -18,7 +21,7 @@ app = FastAPI(title="OCPP Backend MVP")
 # REST API routerek
 app.include_router(charge_points_router, prefix="/api")
 app.include_router(sessions_router, prefix="/api")
-
+app.include_router(payments_stripe_router, prefix="/api")
 
 @app.get("/test/db-test")
 async def db_test(db: AsyncSession = Depends(get_db)):

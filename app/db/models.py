@@ -1,3 +1,4 @@
+# app/db/models.py
 from datetime import datetime, timezone
 
 from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey
@@ -20,7 +21,6 @@ class Location(Base):
     name = Column(String(255), nullable=False)
     address_text = Column(String(512), nullable=True)
 
-    # DB-ben numeric(9,6), itt Float-tal kényelmesen kezeljük
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
 
@@ -36,11 +36,8 @@ class ChargePoint(Base):
     id = Column(Integer, primary_key=True, index=True)
 
     organization_id = Column(Integer, nullable=True)
-
-    # FONTOS: legyen FK, hogy lehessen relationship
     location_id = Column(Integer, ForeignKey("locations.id", ondelete="SET NULL"), nullable=True)
 
-    # OCPP azonosító (path-ban használjuk, pl. VLTHU001B)
     ocpp_id = Column(String, unique=True, index=True, nullable=False)
 
     serial_number = Column(String, nullable=True)
@@ -54,7 +51,6 @@ class ChargePoint(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
-    # kapcsolatok
     location = relationship("Location", back_populates="charge_points")
 
     sessions = relationship(
@@ -69,6 +65,39 @@ class ChargePoint(Base):
         cascade="all, delete-orphan",
     )
 
+    intents = relationship(
+        "ChargingIntent",
+        back_populates="charge_point",
+        cascade="all, delete-orphan",
+    )
+
+
+class ChargingIntent(Base):
+    """
+    Fizetés előtti állapot.
+    """
+    __tablename__ = "charging_intents"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    charge_point_id = Column(Integer, ForeignKey("charge_points.id", ondelete="CASCADE"), nullable=False)
+    connector_id = Column(Integer, nullable=False, default=1)
+
+    anonymous_email = Column(String(255), nullable=False)
+
+    # pending_payment / paid / expired / cancelled
+    status = Column(String(32), nullable=False, default="pending_payment")
+
+    hold_amount_huf = Column(Integer, nullable=False, default=5000)
+
+    stripe_checkout_session_id = Column(String(255), nullable=True, index=True)
+
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    charge_point = relationship("ChargePoint", back_populates="intents")
+    session = relationship("ChargeSession", back_populates="intent", uselist=False)
+
 
 class ChargeSession(Base):
     __tablename__ = "charge_sessions"
@@ -79,23 +108,27 @@ class ChargeSession(Base):
 
     connector_id = Column(Integer, nullable=True)  # pl. 1,2,3...
     ocpp_transaction_id = Column(String, unique=True, nullable=True)
-    user_tag = Column(String, nullable=True)  # RFID / user azonosító
+    user_tag = Column(String, nullable=True)
 
     started_at = Column(DateTime(timezone=True), nullable=False)
     finished_at = Column(DateTime(timezone=True), nullable=True)
 
-    # ÚJ: StartTransaction.meterStart / StopTransaction.meterStop (Wh)
     meter_start_wh = Column(Float, nullable=True)
     meter_stop_wh = Column(Float, nullable=True)
 
-    # összegzett
     energy_kwh = Column(Float, nullable=True)
     cost_huf = Column(Float, nullable=True)
+
+    # ÚJ ownership + fizetéshez kötés (MVP login nélkül)
+    anonymous_email = Column(String(255), nullable=True)
+    intent_id = Column(Integer, ForeignKey("charging_intents.id", ondelete="SET NULL"), nullable=True)
+    stop_code_hash = Column(String(255), nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
     charge_point = relationship("ChargePoint", back_populates="sessions")
+    intent = relationship("ChargingIntent", back_populates="session")
 
     samples = relationship(
         "MeterSample",
@@ -113,13 +146,11 @@ class MeterSample(Base):
 
     connector_id = Column(Integer, nullable=True)
 
-    # OCPP meterValue[].timestamp (ha nincs, akkor szerver idő)
     ts = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
-    # számlázás / kijelzés szempontból fontosak
-    energy_wh_total = Column(Float, nullable=True)  # Energy.Active.Import.Register (Wh)
-    power_w = Column(Float, nullable=True)          # Power.Active.Import (W)
-    current_a = Column(Float, nullable=True)        # Current.Import (A)
+    energy_wh_total = Column(Float, nullable=True)
+    power_w = Column(Float, nullable=True)
+    current_a = Column(Float, nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
