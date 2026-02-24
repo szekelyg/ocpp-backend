@@ -87,5 +87,17 @@ async def stripe_webhook(
     event_id = event.get("id")
     event_type = event.get("type")
     logger.info(f"Stripe webhook received: id={event_id} type={event_type}")
+    
+    data_obj = (event.get("data") or {}).get("object") or {}
+
+    if event_type == "checkout.session.completed":
+        logger.info(
+            "checkout.session.completed: "
+            f"session_id={data_obj.get('id')} "
+            f"payment_status={data_obj.get('payment_status')} "
+            f"currency={data_obj.get('currency')} "
+            f"amount_total={data_obj.get('amount_total')}"
+        )
+        logger.info(f"metadata={data_obj.get('metadata')}")
 
     return {"ok": True}
