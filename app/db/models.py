@@ -1,7 +1,7 @@
 # app/db/models.py
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 
 from .base import Base
@@ -71,33 +71,46 @@ class ChargePoint(Base):
         cascade="all, delete-orphan",
     )
 
-
 class ChargingIntent(Base):
     """
-    Fizetés előtti állapot.
+    Fizetés előtti állapot (Stripe/egyéb provider előtt vagy alatt).
+    Cél: stabil, később is bővíthető (provider-független mezőkkel).
     """
     __tablename__ = "charging_intents"
 
     id = Column(Integer, primary_key=True, index=True)
 
-    charge_point_id = Column(Integer, ForeignKey("charge_points.id", ondelete="CASCADE"), nullable=False)
+    charge_point_id = Column(
+        Integer, ForeignKey("charge_points.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     connector_id = Column(Integer, nullable=False, default=1)
 
-    anonymous_email = Column(String(255), nullable=False)
+    # login nélkül is: email kötelező, később OTP-hez is jó
+    anonymous_email = Column(String(255), nullable=False, index=True)
 
-    # pending_payment / paid / expired / cancelled
-    status = Column(String(32), nullable=False, default="pending_payment")
+    # pending_payment / paid / expired / cancelled / failed
+    status = Column(String(32), nullable=False, default="pending_payment", index=True)
 
+    # választott hold (HUF)
     hold_amount_huf = Column(Integer, nullable=False, default=5000)
 
-    stripe_checkout_session_id = Column(String(255), nullable=True, index=True)
+    # provider-független mezők (Stripe = "stripe", később lehet "barion", "paypal"...)
+    payment_provider = Column(String(32), nullable=True)        # pl. "stripe"
+    payment_provider_ref = Column(String(255), nullable=True, index=True)  # pl. checkout_session_id vagy payment_intent_id
 
-    expires_at = Column(DateTime(timezone=True), nullable=False)
+    # opcionális: miért lett cancelled/failed (debug/support)
+    cancel_reason = Column(String(64), nullable=True)
+    last_error = Column(String(255), nullable=True)
+
+    # 15 perc után automatikusan expire
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
+    # kapcsolatok
     charge_point = relationship("ChargePoint", back_populates="intents")
     session = relationship("ChargeSession", back_populates="intent", uselist=False)
-
 
 class ChargeSession(Base):
     __tablename__ = "charge_sessions"
