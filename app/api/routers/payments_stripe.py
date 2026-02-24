@@ -11,6 +11,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
+from datetime import datetime, timezone
+from sqlalchemy import select
+from app.db.models import ChargingIntent
+from app.db.session import async_session_maker
+
 logger = logging.getLogger("payments.stripe")
 
 router = APIRouter(prefix="/payments/stripe", tags=["payments"])
@@ -116,9 +121,23 @@ async def stripe_webhook(
             f"session_id={session_id} payment_status={payment_status} amount_total={amount_total} currency={currency} metadata={metadata}"
         )
 
-        # TODO (következő lépés):
-        # - metadata.intent_id alapján ChargingIntent status=paid
-        # - létrehoz ChargeSession + stop_code
-        # - RemoteStartTransaction
+        intent_id = (metadata or {}).get("intent_id")
+        if not intent_id:
+            raise HTTPException(status_code=400, detail="missing_intent_id_metadata")
+
+        async with async_session_maker() as db:
+            res = await db.execute(select(ChargingIntent).where(ChargingIntent.id == int(intent_id)))
+            intent = res.scalar_one_or_none()
+            if not intent:
+                raise HTTPException(status_code=404, detail="intent_not_found")
+
+            now = datetime.now(timezone.utc)
+            intent.status = "paid"
+            intent.payment_provider = "stripe"
+            intent.payment_session_id = session_id
+            intent.payment_status = payment_status or "paid"
+            intent.paid_at = now
+            intent.updated_at = now
+            await db.commit()
 
     return {"ok": True}
