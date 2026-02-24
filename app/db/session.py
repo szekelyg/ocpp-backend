@@ -9,8 +9,11 @@ engine = create_async_engine(
     pool_pre_ping=True,
 )
 
-AsyncSessionLocal = async_sessionmaker(
+async_session_maker = async_sessionmaker(
     bind=engine,
     expire_on_commit=False,
     class_=AsyncSession,
 )
+
+# (opcionális, ha máshol ezt a nevet használod)
+AsyncSessionLocal = async_session_maker
