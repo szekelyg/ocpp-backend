@@ -163,26 +163,10 @@ async def start_session(
             },
         )
 
-    # DB: létrehozunk egy "pending/active" sessiont.
-    # Az ocpp_transaction_id tipikusan StartTransaction-ből jön később.
-    s = ChargeSession(
-        charge_point_id=cp.id,
-        connector_id=int(body.connector_id),
-        user_tag=str(body.user_tag),
-        started_at=_utcnow(),
-        finished_at=None,
-        energy_kwh=None,
-        cost_huf=None,
-        ocpp_transaction_id=None,
-    )
-    db.add(s)
-    await db.commit()
-    await db.refresh(s)
-
-    return {
+        return {
         "ok": True,
         "ocpp": ocpp_res,
-        "session": _session_to_dict(s),
+        "hint": "Wait for StartTransaction; session will be created by OCPP handler.",
     }
 
 

@@ -83,23 +83,47 @@ async def start_transaction(cp_id: str, payload: dict) -> Optional[int]:
                 logger.warning(f"StartTransaction: nincs ilyen CP: {cp_id}")
                 return None
 
-            cs = ChargeSession(
-                charge_point_id=cp.id,
-                connector_id=connector_id,
-                user_tag=id_tag if isinstance(id_tag, str) else None,
-                started_at=ts,
-                finished_at=None,
-                meter_start_wh=meter_start,
-                meter_stop_wh=None,
-                energy_kwh=None,
-                cost_huf=None,
-                ocpp_transaction_id=None,
+                # 0) Ha már van nyitott, de még nem kapott ocpp_transaction_id-t,
+            # akkor azt használjuk (dupla session védelem).
+            res_existing = await session.execute(
+                select(ChargeSession)
+                .where(
+                    and_(
+                        ChargeSession.charge_point_id == cp.id,
+                        ChargeSession.finished_at.is_(None),
+                        ChargeSession.connector_id == connector_id,
+                        ChargeSession.ocpp_transaction_id.is_(None),
+                    )
+                )
+                .order_by(ChargeSession.id.desc())
+                .limit(1)
             )
-            session.add(cs)
-            await session.flush()
+            existing = res_existing.scalar_one_or_none()
 
-            # nálunk CSMS transactionId = session id
-            cs.ocpp_transaction_id = str(cs.id)
+            if existing:
+                cs = existing
+                cs.user_tag = id_tag if isinstance(id_tag, str) else cs.user_tag
+                cs.started_at = ts  # ez az OCPP "igazi" indulás ideje
+                cs.meter_start_wh = meter_start
+                cs.ocpp_transaction_id = str(cs.id)  # nálunk txId = session.id
+                logger.info(f"StartTransaction: REUSE existing session id={cs.id} cp={cp_id} connector={connector_id}")
+            else:
+                cs = ChargeSession(
+                    charge_point_id=cp.id,
+                    connector_id=connector_id,
+                    user_tag=id_tag if isinstance(id_tag, str) else None,
+                    started_at=ts,
+                    finished_at=None,
+                    meter_start_wh=meter_start,
+                    meter_stop_wh=None,
+                    energy_kwh=None,
+                    cost_huf=None,
+                    ocpp_transaction_id=None,
+                )
+                session.add(cs)
+                await session.flush()
+                cs.ocpp_transaction_id = str(cs.id)
+                logger.info(f"StartTransaction: NEW session id={cs.id} cp={cp_id} connector={connector_id}")
 
             cp.status = "charging"
             cp.last_seen_at = utcnow()
