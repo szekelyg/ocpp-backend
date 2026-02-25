@@ -27,9 +27,5 @@ const toneClass = {
 
 export default function StatusBadge({ status }) {
   const ui = statusUi(status);
-  return (
-    <span className={["badge", toneClass[ui.tone] || "badgeMuted"].join(" ")} title={String(status || "")}>
-      {ui.label}
-    </span>
-  );
+  return <span className={["badge", toneClass[ui.tone] || "badgeMuted"].join(" ")}>{ui.label}</span>;
 }

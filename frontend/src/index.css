@@ -2,63 +2,84 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  html, body, #root { height: 100%; }
+  body { @apply bg-slate-950 text-slate-100; }
+}
+
+/* --- Design System (B) --- */
 @layer components {
+  /* layout */
+  .page { @apply min-h-screen; }
+  .container { @apply mx-auto max-w-7xl p-6; }
+  .stack { @apply space-y-6; }
 
-  .app { @apply min-h-screen bg-slate-950 text-slate-100; }
+  .headerRow { @apply flex flex-col gap-4 md:flex-row md:items-center md:justify-between; }
+  .title { @apply text-3xl font-semibold tracking-tight; }
+  .subtitle { @apply text-sm text-slate-400; }
 
-  .header { @apply max-w-7xl mx-auto px-6 pt-8 flex flex-col md:flex-row md:items-center md:justify-between gap-6; }
-  .brand h1 { @apply text-3xl font-semibold tracking-tight; }
-  .brand p { @apply text-slate-400 text-sm; }
+  .pill { @apply text-sm bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl; }
 
-  .pills { @apply flex items-center gap-3; }
-  .pill { @apply text-xs bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl; }
-
-  .sep { @apply max-w-7xl mx-auto my-6 border-slate-800; }
-
-  .layoutGrid { @apply max-w-6xl mx-auto px-6 pb-10 grid grid-cols-1 lg:grid-cols-3 gap-6; }
+  .grid3 { @apply grid grid-cols-1 xl:grid-cols-3 gap-6; }
+  .col2 { @apply xl:col-span-2; }
   .rightCol { @apply space-y-6; }
 
+  /* cards */
   .card { @apply bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden; }
   .cardHeader { @apply px-5 py-4 border-b border-slate-800; }
   .cardTitle { @apply font-medium; }
   .cardSub { @apply text-xs text-slate-400; }
   .cardBody { @apply p-5; }
 
-  .mapWrap { @apply h-[520px] w-full rounded-xl overflow-hidden border border-slate-800; }
-  .leaflet-container { height: 100%; width: 100%; background: #0b1220; }
-  
-  .toolbar { @apply flex gap-3; }
-  .input { @apply w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-blue-500/40; }
-  .select { @apply mt-3 w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100; }
+  /* buttons */
+  .btn { @apply inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-medium border transition
+               border-slate-700 bg-slate-800 text-slate-100 hover:bg-slate-700
+               focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-60 disabled:cursor-not-allowed; }
+  .btnPrimary { @apply border-blue-500/50 bg-blue-600 hover:bg-blue-500; }
+  .btnGhost { @apply bg-transparent border-slate-700 hover:bg-slate-900; }
 
-  .btn { @apply bg-slate-800 border border-slate-700 text-sm px-4 py-2 rounded-xl hover:bg-slate-700 transition; }
-  .btnPrimary { @apply bg-blue-600 border-blue-500 hover:bg-blue-500; }
-  .btnGhost { @apply bg-transparent border border-slate-700 hover:bg-slate-800; }
+  /* form */
+  .field { @apply w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-slate-100
+                 outline-none transition focus:ring-2 focus:ring-blue-500/40; }
+  .label { @apply text-xs font-medium text-slate-400; }
 
+  .toolbar { @apply space-y-3; }
+  .toolbarRow { @apply flex flex-col gap-2 sm:flex-row sm:items-center; }
+  .toolbarLabelRow { @apply flex flex-col gap-2 sm:flex-row sm:items-center; }
+  .toolbarLabel { @apply label sm:w-28; }
+
+  /* list */
   .list { @apply flex flex-col gap-3; }
+  .listItem { @apply w-full text-left rounded-xl border p-4 transition
+                    bg-slate-950/30 border-slate-800 hover:bg-slate-900/60 hover:border-slate-700
+                    focus:outline-none focus:ring-2 focus:ring-blue-500/40; }
+  .listItemSelected { @apply ring-2 ring-blue-500/30 border-blue-500/40; }
+  .listItemTop { @apply flex items-start justify-between gap-3; }
+  .listItemTitle { @apply text-sm font-semibold text-slate-100; }
+  .listItemMeta { @apply mt-2 text-sm text-slate-300 leading-snug; }
+  .listItemMeta2 { @apply text-slate-400; }
+  .listItemFoot { @apply mt-3 text-xs text-slate-400; }
 
-  .item { @apply bg-slate-900 border border-slate-800 rounded-xl p-4 hover:bg-slate-800 transition; }
-  .itemTop { @apply flex items-center justify-between gap-3; }
-  .itemId { @apply font-semibold; }
-  .itemMeta { @apply text-sm text-slate-400 mt-2; }
+  /* selected details */
+  .detailGrid { @apply grid grid-cols-3 gap-x-4 gap-y-3 text-sm; }
+  .detailKey { @apply text-slate-400; }
+  .detailValStrong { @apply col-span-2 font-semibold text-slate-100; }
+  .detailVal { @apply col-span-2 text-slate-300; }
+  .hint { @apply rounded-xl border border-slate-800 bg-slate-950/30 p-3 text-xs text-slate-400; }
+  .actions { @apply flex flex-col gap-2 sm:flex-row; }
 
-  .detailGrid { @apply grid grid-cols-[110px_1fr] gap-y-3 gap-x-4 text-sm; }
-  .key { @apply text-slate-400; }
-  .val { @apply text-slate-100; }
+  /* map */
+  .mapFrame { @apply h-[520px] w-full; }
+  .leaflet-container { height: 100%; width: 100%; background: #0b1220; }
 
-  .actions { @apply mt-6 flex flex-col sm:flex-row gap-3; }
-
-  .footerNote { @apply mt-4 text-xs text-slate-400 bg-slate-800 border border-slate-700 rounded-xl p-3; }
-
-  .smallFooter { @apply max-w-7xl mx-auto px-6 pb-10 text-xs text-slate-500 text-center; }
-
+  /* badges */
   .badge { @apply inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border; }
-
-  /* Dark badge palette */
   .badgeGood { @apply bg-emerald-900/40 text-emerald-300 border-emerald-700; }
   .badgeOk { @apply bg-sky-900/40 text-sky-300 border-sky-700; }
   .badgeWarn { @apply bg-amber-900/40 text-amber-300 border-amber-700; }
   .badgeBad { @apply bg-rose-900/40 text-rose-300 border-rose-700; }
   .badgeMuted { @apply bg-slate-800 text-slate-400 border-slate-700; }
 
+  /* banners */
+  .errorBanner { @apply rounded-2xl border border-red-900/50 bg-red-950/40 px-4 py-3 text-sm text-red-200; }
 }
