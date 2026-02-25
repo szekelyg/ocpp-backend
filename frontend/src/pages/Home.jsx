@@ -148,7 +148,7 @@ export default function Home() {
             </div>
 
             {/* IMPORTANT: fix magasság + a MapContainer (MapView) kapja a h-full-t */}
-            <div className="h-[520px] w-full">
+            <div className="h-full w-full">
               <MapView points={filtered} onSelect={setSelectedId} />
             </div>
           </div>
