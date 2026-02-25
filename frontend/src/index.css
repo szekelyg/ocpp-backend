@@ -24,8 +24,9 @@
   .cardSub { @apply text-xs text-slate-400; }
   .cardBody { @apply p-5; }
 
-  .mapWrap { @apply aspect-[16/9] w-full rounded-xl overflow-hidden border border-slate-800; }
-
+  .mapWrap { @apply h-[520px] w-full rounded-xl overflow-hidden border border-slate-800; }
+  .leaflet-container { height: 100%; width: 100%; background: #0b1220; }
+  
   .toolbar { @apply flex gap-3; }
   .input { @apply w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-blue-500/40; }
   .select { @apply mt-3 w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100; }
