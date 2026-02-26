@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 
 import stripe
 from fastapi import APIRouter, Depends, HTTPException
@@ -42,6 +41,16 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
     if not cp:
         raise HTTPException(status_code=404, detail="ChargePoint not found")
 
+    # 1/b) státusz gate (UI is tilt, de backend is kötelezően véd)
+    if (cp.status or "").lower() != "available":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "charge_point_not_available",
+                "status": cp.status,
+            },
+        )
+
     # 2) Intent létrehozás DB-ben
     intent = ChargingIntent(
         charge_point_id=cp.id,
@@ -55,21 +64,25 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
     await db.commit()
     await db.refresh(intent)
 
-    # 3) Stripe Checkout Session létrehozás
+    # 3) Stripe Checkout Session
     try:
         stripe.api_key = _get_env("STRIPE_SECRET_KEY")
         base_url = _get_env("PUBLIC_BASE_URL").rstrip("/")
 
-        checkout = stripe.checkout.Session.create(
+        # redundáns kötés: metadata + client_reference_id
+        meta = {
+            "intent_id": str(intent.id),
+            "charge_point_id": str(cp.id),
+            "connector_id": str(body.connector_id),
+        }
+
+                checkout = stripe.checkout.Session.create(
             mode="payment",
             success_url=f"{base_url}/pay/success?intent_id={intent.id}",
             cancel_url=f"{base_url}/pay/cancel?intent_id={intent.id}",
             customer_email=str(body.email),
-            metadata={
-                "intent_id": str(intent.id),
-                "charge_point_id": str(cp.id),
-                "connector_id": str(body.connector_id),
-            },
+            client_reference_id=str(intent.id),
+            metadata=meta,
             line_items=[
                 {
                     "price_data": {
@@ -80,13 +93,20 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
                     "quantity": 1,
                 }
             ],
+            payment_intent_data={"metadata": meta},
+            stripe_request_options={"idempotency_key": f"intent:{intent.id}"},
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail={"error": "stripe_checkout_create_failed", "reason": str(e)})
 
-    # 4) Intent frissítés provider-agnosztikus mezőkkel
+    # 3/b) Idempotency (Stripe SDK-nál: stripe_request_options)
+    # Ha akarod 100% idempotensre: fent így:
+    # checkout = stripe.checkout.Session.create(..., stripe_request_options={"idempotency_key": f"intent:{intent.id}"})
+
+    # 4) Intent frissítés
     intent.payment_provider = "stripe"
-    intent.payment_session_id = checkout["id"]
+    intent.payment_session_id = checkout.get("id")
+    intent.payment_provider_ref = checkout.get("id")  # ha van ilyen oszlopod DB-ben
     intent.currency = "huf"
     intent.amount_huf = int(body.hold_amount_huf)
     intent.payment_status = "created"
