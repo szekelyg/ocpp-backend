@@ -61,7 +61,7 @@ INDEX_HTML = FRONTEND_DIST / "index.html"
 
 # statikus assetek (Vite build: /assets/*)
 if FRONTEND_DIST.exists():
-    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=False), name="frontend-static")
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend-static")
 else:
     logger.warning(f"frontend dist not found at: {FRONTEND_DIST}")
 
