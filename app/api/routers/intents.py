@@ -37,18 +37,18 @@ class CreateIntentIn(BaseModel):
 @router.post("/", response_model=dict)
 async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)):
     # 1) CP ellenőrzés
-    cp = (await db.execute(select(ChargePoint).where(ChargePoint.id == body.charge_point_id))).scalar_one_or_none()
+    cp = (
+        (await db.execute(select(ChargePoint).where(ChargePoint.id == body.charge_point_id)))
+        .scalar_one_or_none()
+    )
     if not cp:
         raise HTTPException(status_code=404, detail="ChargePoint not found")
 
-    # 1/b) státusz gate (UI is tilt, de backend is kötelezően véd)
+    # 1/b) státusz gate (backend védelem)
     if (cp.status or "").lower() != "available":
         raise HTTPException(
             status_code=409,
-            detail={
-                "error": "charge_point_not_available",
-                "status": cp.status,
-            },
+            detail={"error": "charge_point_not_available", "status": cp.status},
         )
 
     # 2) Intent létrehozás DB-ben
@@ -69,48 +69,50 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
         stripe.api_key = _get_env("STRIPE_SECRET_KEY")
         base_url = _get_env("PUBLIC_BASE_URL").rstrip("/")
 
-        # redundáns kötés: metadata + client_reference_id
         meta = {
             "intent_id": str(intent.id),
             "charge_point_id": str(cp.id),
             "connector_id": str(body.connector_id),
         }
 
+        # Stripe python: idempotency key az options dict-ben (2. param)
         checkout = stripe.checkout.Session.create(
-            mode="payment",
-            success_url=f"{base_url}/pay/success?intent_id={intent.id}",
-            cancel_url=f"{base_url}/pay/cancel?intent_id={intent.id}",
-            customer_email=str(body.email),
-            client_reference_id=str(intent.id),
-            metadata=meta,
-            line_items=[
-                {
-                    "price_data": {
-                        "currency": "huf",
-                        "product_data": {"name": "EV charging hold (deposit)"},
-                        "unit_amount": int(body.hold_amount_huf) * 100,
-                    },
-                    "quantity": 1,
-                }
-            ],
-            payment_intent_data={"metadata": meta},
-        , {"idempotency_key": f"intent:{intent.id}"})
+            {
+                "mode": "payment",
+                "success_url": f"{base_url}/pay/success?intent_id={intent.id}",
+                "cancel_url": f"{base_url}/pay/cancel?intent_id={intent.id}",
+                "customer_email": str(body.email),
+                "client_reference_id": str(intent.id),
+                "metadata": meta,
+                "line_items": [
+                    {
+                        "price_data": {
+                            "currency": "huf",
+                            "product_data": {"name": "EV charging hold (deposit)"},
+                            "unit_amount": int(body.hold_amount_huf) * 100,
+                        },
+                        "quantity": 1,
+                    }
+                ],
+                # fontos: payment_intent metadata is (Stripe sok eseménynél ezt adja)
+                "payment_intent_data": {"metadata": meta},
+            },
+            {"idempotency_key": f"intent:{intent.id}"},
+        )
     except Exception as e:
-        raise HTTPException(status_code=502, detail={"error": "stripe_checkout_create_failed", "reason": str(e)})
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "stripe_checkout_create_failed", "reason": str(e)},
+        )
 
-    # 3/b) Idempotency (Stripe SDK-nál: stripe_request_options)
-    # Ha akarod 100% idempotensre: fent így:
-    # checkout = stripe.checkout.Session.create(..., stripe_request_options={"idempotency_key": f"intent:{intent.id}"})
-
-    # 4) Intent frissítés
+    # 4) Intent frissítés (a te DB oszlopaidhoz igazítva)
     intent.payment_provider = "stripe"
     intent.payment_session_id = checkout.get("id")
-    intent.payment_provider_ref = checkout.get("id")  # ha van ilyen oszlopod DB-ben
+    intent.payment_provider_ref = checkout.get("id")
     intent.currency = "huf"
     intent.amount_huf = int(body.hold_amount_huf)
     intent.payment_status = "created"
     intent.updated_at = _utcnow()
-
     await db.commit()
 
     return {
