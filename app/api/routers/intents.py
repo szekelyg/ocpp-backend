@@ -76,7 +76,7 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
             "connector_id": str(body.connector_id),
         }
 
-                checkout = stripe.checkout.Session.create(
+        checkout = stripe.checkout.Session.create(
             mode="payment",
             success_url=f"{base_url}/pay/success?intent_id={intent.id}",
             cancel_url=f"{base_url}/pay/cancel?intent_id={intent.id}",
