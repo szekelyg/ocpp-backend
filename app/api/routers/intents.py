@@ -100,11 +100,10 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
             "payment_intent_data": {"metadata": meta},
         }
 
-        # STRIPE idempotency: request option, nem API param.
-        checkout = stripe.checkout.Session.create(
-            params,
-            idempotency_key=f"intent:{intent.id}",
-        )
+        # STRIPE idempotency: a te stripe verziódnál a 2. arg nem mehet.
+        # Megoldás: globál request context.
+        stripe.idempotency_key = f"intent:{intent.id}"
+        checkout = stripe.checkout.Session.create(params)
 
     except Exception as e:
         logger.exception("stripe_checkout_create_failed intent_id=%s cp_id=%s", intent.id, cp.id)
