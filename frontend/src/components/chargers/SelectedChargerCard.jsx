@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import StatusBadge from "../ui/StatusBadge";
 import { placeLines, formatHu } from "../../utils/format";
+import PayModal from "../ui/PayModal";
 
 function isAvailable(status) {
   return String(status || "").toLowerCase() === "available";
@@ -26,7 +27,6 @@ export default function SelectedChargerCard({ cp }) {
       setErr("Adj meg egy email címet.");
       return;
     }
-    // nagyon minimál validáció
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) {
       setErr("Hibás email formátum.");
       return;
@@ -57,7 +57,6 @@ export default function SelectedChargerCard({ cp }) {
       const url = data?.checkout_url;
       if (!url) throw new Error("Nem jött checkout_url a backendtől.");
 
-      // redirect Stripe Checkout
       window.location.href = url;
     } catch (e) {
       setErr(e?.message || "Hiba történt.");
@@ -81,7 +80,8 @@ export default function SelectedChargerCard({ cp }) {
         <div className="detailVal flex items-center gap-3">
           <StatusBadge status={cp.status} />
           <span className="text-xs text-slate-400">
-            (OCPP: <span className="font-semibold text-slate-200">{String(cp.status || "—")}</span>)
+            (OCPP:{" "}
+            <span className="font-semibold text-slate-200">{String(cp.status || "—")}</span>)
           </span>
         </div>
 
@@ -120,55 +120,57 @@ export default function SelectedChargerCard({ cp }) {
           A töltés indítása csak akkor aktív, ha a státusz <b>available</b>.
         </div>
       ) : (
-        <div className="hint">
-          Indítás: email → Stripe fizetés → webhook → RemoteStartTransaction.
-        </div>
+        <div className="hint">Indítás: email → Stripe fizetés → webhook → RemoteStartTransaction.</div>
       )}
 
-      {showPay ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950 p-5 shadow-xl">
-            <div className="text-slate-100 font-semibold text-base">Fizetés indítása</div>
-            <div className="mt-1 text-slate-400 text-sm">
-              Add meg az emailed. Erre küldjük később a stop kódot / bizonylatot.
-            </div>
-
-            <div className="mt-4">
-              <label className="block text-xs text-slate-400 mb-2">Email</label>
-              <input
-                className="w-full rounded-xl border border-slate-800 bg-slate-900/40 px-3 py-2 text-slate-100 outline-none focus:ring-2 focus:ring-blue-500/40"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="email@domain.hu"
-                autoFocus
-                disabled={busy}
-              />
-              {err ? <div className="mt-2 text-sm text-red-400">{err}</div> : null}
-            </div>
-
-            <div className="mt-5 flex gap-2 justify-end">
-              <button
-                type="button"
-                className="btn btnGhost"
-                onClick={() => {
-                  if (busy) return;
-                  setShowPay(false);
-                }}
-              >
-                Mégse
-              </button>
-              <button
-                type="button"
-                className="btn btnPrimary"
-                disabled={busy || !isAvailable(cp.status)}
-                onClick={startFlow}
-              >
-                {busy ? "Átirányítás..." : "Fizetés (5000 Ft)"}
-              </button>
-            </div>
-          </div>
+      <PayModal
+        open={showPay}
+        busy={busy}
+        onClose={() => {
+          if (busy) return;
+          setShowPay(false);
+        }}
+      >
+        <div className="text-slate-100 font-semibold text-base">Fizetés indítása</div>
+        <div className="mt-1 text-slate-400 text-sm">
+          Add meg az emailed. Erre küldjük később a stop kódot / bizonylatot.
         </div>
-      ) : null}
+
+        <div className="mt-4">
+          <label className="block text-xs text-slate-400 mb-2">Email</label>
+          <input
+            className="w-full rounded-xl border border-slate-800 bg-slate-900/40 px-3 py-2 text-slate-100 outline-none focus:ring-2 focus:ring-blue-500/40"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="email@domain.hu"
+            autoFocus
+            disabled={busy}
+          />
+          {err ? <div className="mt-2 text-sm text-red-400">{err}</div> : null}
+        </div>
+
+        <div className="mt-5 flex gap-2 justify-end">
+          <button
+            type="button"
+            className="btn btnGhost"
+            onClick={() => {
+              if (busy) return;
+              setShowPay(false);
+            }}
+          >
+            Mégse
+          </button>
+
+          <button
+            type="button"
+            className="btn btnPrimary"
+            disabled={busy || !isAvailable(cp.status)}
+            onClick={startFlow}
+          >
+            {busy ? "Átirányítás..." : "Fizetés (5000 Ft)"}
+          </button>
+        </div>
+      </PayModal>
     </div>
   );
 }
