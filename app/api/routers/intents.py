@@ -1,6 +1,7 @@
 # app/api/routers/intents.py
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime, timezone, timedelta
 
@@ -12,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
 from app.db.models import ChargePoint, ChargingIntent
+
+logger = logging.getLogger("intents")
 
 router = APIRouter(prefix="/intents", tags=["intents"])
 
@@ -29,7 +32,7 @@ def _get_env(name: str) -> str:
 
 class CreateIntentIn(BaseModel):
     charge_point_id: int = Field(..., ge=1)
-    connector_id: int = Field(1, ge=1)
+    connector_id: int = Field(1, ge=0)  # !!! 0 is lehet (szimulátor)
     email: EmailStr
     hold_amount_huf: int = Field(5000, ge=1000, le=25000)
 
@@ -42,10 +45,10 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
         .scalar_one_or_none()
     )
     if not cp:
-        raise HTTPException(status_code=404, detail="ChargePoint not found")
+        raise HTTPException(status_code=404, detail="charge_point_not_found")
 
     # 1/b) státusz gate (backend védelem)
-    if (cp.status or "").lower() != "available":
+    if (cp.status or "").strip().lower() != "available":
         raise HTTPException(
             status_code=409,
             detail={"error": "charge_point_not_available", "status": cp.status},
@@ -59,6 +62,8 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
         status="pending_payment",
         hold_amount_huf=int(body.hold_amount_huf),
         expires_at=_utcnow() + timedelta(minutes=15),
+        created_at=_utcnow(),
+        updated_at=_utcnow(),
     )
     db.add(intent)
     await db.commit()
@@ -75,37 +80,41 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
             "connector_id": str(body.connector_id),
         }
 
-        # Stripe python: idempotency key az options dict-ben (2. param)
+        params = {
+            "mode": "payment",
+            "success_url": f"{base_url}/pay/success?intent_id={intent.id}",
+            "cancel_url": f"{base_url}/pay/cancel?intent_id={intent.id}",
+            "customer_email": str(body.email),
+            "client_reference_id": str(intent.id),
+            "metadata": meta,
+            "line_items": [
+                {
+                    "price_data": {
+                        "currency": "huf",
+                        "product_data": {"name": "EV charging hold (deposit)"},
+                        "unit_amount": int(body.hold_amount_huf) * 100,
+                    },
+                    "quantity": 1,
+                }
+            ],
+            "payment_intent_data": {"metadata": meta},
+        }
+
+        # STRIPE idempotency: request option, nem API param.
         checkout = stripe.checkout.Session.create(
-            {
-                "mode": "payment",
-                "success_url": f"{base_url}/pay/success?intent_id={intent.id}",
-                "cancel_url": f"{base_url}/pay/cancel?intent_id={intent.id}",
-                "customer_email": str(body.email),
-                "client_reference_id": str(intent.id),
-                "metadata": meta,
-                "line_items": [
-                    {
-                        "price_data": {
-                            "currency": "huf",
-                            "product_data": {"name": "EV charging hold (deposit)"},
-                            "unit_amount": int(body.hold_amount_huf) * 100,
-                        },
-                        "quantity": 1,
-                    }
-                ],
-                # fontos: payment_intent metadata is (Stripe sok eseménynél ezt adja)
-                "payment_intent_data": {"metadata": meta},
-            },
-            {"idempotency_key": f"intent:{intent.id}"},
+            params,
+            idempotency_key=f"intent:{intent.id}",
         )
+
     except Exception as e:
+        logger.exception("stripe_checkout_create_failed intent_id=%s cp_id=%s", intent.id, cp.id)
+        await db.rollback()
         raise HTTPException(
             status_code=502,
             detail={"error": "stripe_checkout_create_failed", "reason": str(e)},
         )
 
-    # 4) Intent frissítés (a te DB oszlopaidhoz igazítva)
+    # 4) Intent frissítés (DB oszlopokhoz igazítva)
     intent.payment_provider = "stripe"
     intent.payment_session_id = checkout.get("id")
     intent.payment_provider_ref = checkout.get("id")
