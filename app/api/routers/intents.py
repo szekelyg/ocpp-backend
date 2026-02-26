@@ -94,8 +94,7 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
                 }
             ],
             payment_intent_data={"metadata": meta},
-            stripe_request_options={"idempotency_key": f"intent:{intent.id}"},
-        )
+        , {"idempotency_key": f"intent:{intent.id}"})
     except Exception as e:
         raise HTTPException(status_code=502, detail={"error": "stripe_checkout_create_failed", "reason": str(e)})
 
