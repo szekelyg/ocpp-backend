@@ -65,7 +65,7 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
         status="pending_payment",
         hold_amount_huf=int(body.hold_amount_huf),
         expires_at=_utcnow() + timedelta(minutes=15),
-        currency="huf",
+       # currency="huf",
     )
     db.add(intent)
     await db.commit()
@@ -107,6 +107,7 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
             **params,
             idempotency_key=f"intent:{intent.id}",
         )
+       
 
     except Exception as e:
         logger.exception("stripe_checkout_create_failed intent_id=%s cp_id=%s", intent.id, cp.id)
