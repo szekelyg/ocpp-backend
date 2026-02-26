@@ -36,6 +36,9 @@ class CreateIntentIn(BaseModel):
     email: EmailStr
     hold_amount_huf: int = Field(5000, ge=1000, le=25000)
 
+import logging
+logger = logging.getLogger("intents")
+
 
 @router.post("/", response_model=dict)
 async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)):
@@ -45,10 +48,10 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
         .scalar_one_or_none()
     )
     if not cp:
-        raise HTTPException(status_code=404, detail="charge_point_not_found")
+        raise HTTPException(status_code=404, detail="ChargePoint not found")
 
     # 1/b) státusz gate (backend védelem)
-    if (cp.status or "").strip().lower() != "available":
+    if (cp.status or "").lower() != "available":
         raise HTTPException(
             status_code=409,
             detail={"error": "charge_point_not_available", "status": cp.status},
@@ -62,8 +65,7 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
         status="pending_payment",
         hold_amount_huf=int(body.hold_amount_huf),
         expires_at=_utcnow() + timedelta(minutes=15),
-        created_at=_utcnow(),
-        updated_at=_utcnow(),
+        currency="huf",
     )
     db.add(intent)
     await db.commit()
@@ -100,10 +102,11 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
             "payment_intent_data": {"metadata": meta},
         }
 
-        # STRIPE idempotency: a te stripe verziódnál a 2. arg nem mehet.
-        # Megoldás: globál request context.
-        stripe.idempotency_key = f"intent:{intent.id}"
-        checkout = stripe.checkout.Session.create(params)
+        # ✅ nálad így jó: kwargs + idempotency_key keyword
+        checkout = stripe.checkout.Session.create(
+            **params,
+            idempotency_key=f"intent:{intent.id}",
+        )
 
     except Exception as e:
         logger.exception("stripe_checkout_create_failed intent_id=%s cp_id=%s", intent.id, cp.id)
@@ -113,13 +116,12 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
             detail={"error": "stripe_checkout_create_failed", "reason": str(e)},
         )
 
-    # 4) Intent frissítés (DB oszlopokhoz igazítva)
+    # 4) Intent frissítés
     intent.payment_provider = "stripe"
     intent.payment_session_id = checkout.get("id")
     intent.payment_provider_ref = checkout.get("id")
-    intent.currency = "huf"
     intent.amount_huf = int(body.hold_amount_huf)
-    intent.payment_status = "created"
+    intent.payment_status = checkout.get("payment_status") or "created"
     intent.updated_at = _utcnow()
     await db.commit()
 
