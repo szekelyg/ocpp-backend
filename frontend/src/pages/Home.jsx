@@ -138,8 +138,8 @@ export default function Home() {
               <div className="text-xs text-slate-400">{loading ? "Szinkron…" : " "}</div>
             </div>
 
-            {/* ⬇⬇⬇ EZ A LÉNYEG: fix magasság, különben Leaflet 0px magas lesz */}
-            <div className="w-full h-[55vh] min-h-[360px] xl:h-[70vh]">
+            {/* ⬇⬇⬇ map container magasság */}
+            <div className="w-full h-[60vh] md:h-[70vh] lg:h-[75vh] xl:h-[80vh] 2xl:h-[85vh]">
               <MapView points={filtered} onSelect={setSelectedId} />
             </div>
           </div>
