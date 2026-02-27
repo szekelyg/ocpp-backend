@@ -11,6 +11,8 @@ function statusUi(statusRaw) {
     unavailable: { label: "Nem elérhető", tone: "bad" },
     faulted: { label: "Hibás", tone: "bad" },
     reserved: { label: "Foglalt", tone: "warn" },
+    offline: { label: "Offline", tone: "muted" },
+    unknown: { label: "Ismeretlen", tone: "muted" },
   };
 
   if (!s) return { label: "Ismeretlen", tone: "muted" };
