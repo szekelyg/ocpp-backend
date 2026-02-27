@@ -21,7 +21,6 @@ export default function Home() {
   const abortRef = useRef(null);
 
   const refresh = useCallback(async () => {
-    // előző fetch leállítása, ha még fut
     if (abortRef.current) abortRef.current.abort();
 
     const ac = new AbortController();
@@ -36,15 +35,13 @@ export default function Home() {
         headers: { Accept: "application/json" },
       });
 
-      if (!res.ok) {
-        throw new Error(`API hiba: ${res.status} ${res.statusText}`);
-      }
+      if (!res.ok) throw new Error(`API hiba: ${res.status} ${res.statusText}`);
 
       const data = await res.json();
       setItems(Array.isArray(data) ? data : []);
       setLastUpdated(new Date());
     } catch (e) {
-      if (e?.name === "AbortError") return; // normális
+      if (e?.name === "AbortError") return;
       setError(e?.message || "Ismeretlen hiba");
     } finally {
       setLoading(false);
@@ -67,16 +64,13 @@ export default function Home() {
       const status = (cp.status || "").toString().trim().toLowerCase();
       const matchStatus = statusFilter === "all" ? true : status === statusFilter;
 
-      const hay = `${cp.ocpp_id || ""} ${cp.location_name || ""} ${cp.address_text || ""}`
-        .toLowerCase();
-
+      const hay = `${cp.ocpp_id || ""} ${cp.location_name || ""} ${cp.address_text || ""}`.toLowerCase();
       const matchQuery = q ? hay.includes(q) : true;
 
       return matchStatus && matchQuery;
     });
   }, [items, query, statusFilter]);
 
-  // ha kiválasztott eltűnt a filter miatt, lépj az elsőre
   const selected = useMemo(() => {
     return filtered.find((x) => x.id === selectedId) || filtered[0] || null;
   }, [filtered, selectedId]);
@@ -141,14 +135,11 @@ export default function Home() {
                 <div className="font-medium">Térkép</div>
                 <div className="text-xs text-slate-400">Töltők: {filtered.length}</div>
               </div>
-
-              <div className="text-xs text-slate-400">
-                {loading ? "Szinkron…" : " "}
-              </div>
+              <div className="text-xs text-slate-400">{loading ? "Szinkron…" : " "}</div>
             </div>
 
-            {/* IMPORTANT: fix magasság + a MapContainer (MapView) kapja a h-full-t */}
-            <div className="h-full w-full">
+            {/* ⬇⬇⬇ EZ A LÉNYEG: fix magasság, különben Leaflet 0px magas lesz */}
+            <div className="w-full h-[55vh] min-h-[360px] xl:h-[70vh]">
               <MapView points={filtered} onSelect={setSelectedId} />
             </div>
           </div>

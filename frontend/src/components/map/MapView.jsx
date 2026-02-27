@@ -10,10 +10,18 @@ import { useEffect, useMemo, useRef } from "react";
 import StatusBadge from "../ui/StatusBadge";
 import { placeLines } from "../../utils/format";
 
+// In-memory view cache (page refreshig él)
+const viewCache = {
+  hasUserView: false,
+  center: null, // [lat,lng]
+  zoom: null,
+};
+
 function InvalidateSize() {
   const map = useMap();
 
   useEffect(() => {
+    // ha a konténer épp most kapott magasságot (grid/flex), ez kell
     map.invalidateSize();
     const t1 = setTimeout(() => map.invalidateSize(), 0);
     const t2 = setTimeout(() => map.invalidateSize(), 200);
@@ -31,27 +39,62 @@ function InvalidateSize() {
   return null;
 }
 
-// Csak az első értelmes marker-készletnél fitelünk.
-// Utána SOHA, kivéve ha explicit "Recenter" gombot csinálunk később.
+function ViewPersistence() {
+  const map = useMap();
+  const restoringRef = useRef(false);
+
+  // mountkor: ha volt user view, állítsuk vissza
+  useEffect(() => {
+    if (!viewCache.hasUserView || !viewCache.center || viewCache.zoom == null) return;
+
+    restoringRef.current = true;
+    map.setView(viewCache.center, viewCache.zoom, { animate: false });
+
+    // engedjük el a restore flag-et kicsit később
+    const t = setTimeout(() => {
+      restoringRef.current = false;
+    }, 150);
+
+    return () => clearTimeout(t);
+  }, [map]);
+
+  // user move/zoom után: mentsük a view-t
+  useMapEvents({
+    moveend: () => {
+      if (restoringRef.current) return;
+      const c = map.getCenter();
+      viewCache.center = [c.lat, c.lng];
+      viewCache.zoom = map.getZoom();
+      viewCache.hasUserView = true;
+    },
+    zoomend: () => {
+      if (restoringRef.current) return;
+      const c = map.getCenter();
+      viewCache.center = [c.lat, c.lng];
+      viewCache.zoom = map.getZoom();
+      viewCache.hasUserView = true;
+    },
+    dragstart: () => {
+      // jelzi, hogy user interakció történt
+      viewCache.hasUserView = true;
+    },
+  });
+
+  return null;
+}
+
+// Csak akkor fitelünk automatikusan, ha NINCS user view még.
 function FitInitialBounds({ points }) {
   const map = useMap();
   const didFitRef = useRef(false);
-  const userMovedRef = useRef(false);
-
-  useMapEvents({
-    dragstart: () => (userMovedRef.current = true),
-    zoomstart: () => (userMovedRef.current = true),
-  });
 
   useEffect(() => {
     if (didFitRef.current) return;
-    if (userMovedRef.current) return;
-
+    if (viewCache.hasUserView) return;
     if (!points.length) return;
 
     const bounds = points.map((p) => [p.latitude, p.longitude]);
     map.fitBounds(bounds, { padding: [40, 40] });
-
     didFitRef.current = true;
   }, [map, points]);
 
@@ -75,6 +118,7 @@ export default function MapView({ points = [], onSelect }) {
       className="h-full w-full"
     >
       <InvalidateSize />
+      <ViewPersistence />
 
       <TileLayer
         attribution="&copy; OpenStreetMap"
@@ -85,7 +129,6 @@ export default function MapView({ points = [], onSelect }) {
 
       {mappable.map((cp) => {
         const lines = placeLines(cp);
-
         return (
           <Marker
             key={cp.id}
@@ -97,9 +140,7 @@ export default function MapView({ points = [], onSelect }) {
                 <div className="font-semibold">{cp.ocpp_id}</div>
                 <StatusBadge status={cp.status} />
                 <div>{lines[0]}</div>
-                {lines[1] ? (
-                  <div className="text-slate-500">{lines[1]}</div>
-                ) : null}
+                {lines[1] ? <div className="text-slate-500">{lines[1]}</div> : null}
               </div>
             </Popup>
           </Marker>
