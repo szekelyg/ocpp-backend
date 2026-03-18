@@ -2,9 +2,9 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, Depends, WebSocket
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, Depends, HTTPException, WebSocket
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
@@ -59,27 +59,29 @@ async def ocpp_no_id(ws: WebSocket):
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 INDEX_HTML = FRONTEND_DIST / "index.html"
 
-# statikus assetek (Vite build: /assets/*)
-if FRONTEND_DIST.exists():
-    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend-static")
+# Csak a /assets/* könyvtárat mountoljuk statikusan (Vite build output)
+# A "/" mount html=True módban elnyeli a kéréseket a SPA fallback elől → 404
+if (FRONTEND_DIST / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="static-assets")
 else:
-    logger.warning(f"frontend dist not found at: {FRONTEND_DIST}")
+    logger.warning(f"frontend assets not found at: {FRONTEND_DIST / 'assets'}")
 
 
 @app.get("/{full_path:path}")
 async def spa_fallback(full_path: str):
     """
-    SPA fallback: minden NEM /api és NEM /ocpp és NEM /test útvonal index.html-t kap.
-    Így a React Router (pl. /pay/success) nem 404.
+    SPA fallback: minden nem-API útvonal index.html-t kap (React Router).
+    Egyedi statikus fájlokat (favicon, vite.svg stb.) közvetlenül szolgálunk ki.
     """
-    # backend route-ok kizárása
     if full_path.startswith(("api/", "ocpp", "test/")):
-        # itt direkt 404 (ne nyelje le)
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Not Found")
 
+    # Konkrét statikus fájl (pl. /vite.svg, /favicon.ico)
+    static_file = FRONTEND_DIST / full_path
+    if static_file.is_file():
+        return FileResponse(str(static_file))
+
     if not INDEX_HTML.exists():
-        from fastapi import HTTPException
         raise HTTPException(status_code=503, detail="frontend_not_built")
 
     return FileResponse(str(INDEX_HTML))
