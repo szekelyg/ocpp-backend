@@ -64,18 +64,26 @@ def _verify_stripe_signature(payload: bytes, sig_header: str, secret: str, toler
     Minimal, library-free signature verification (v1, HMAC-SHA256).
     """
     if not sig_header:
+        logger.error("STRIPE_SIG_FAIL: missing header")
         raise HTTPException(status_code=400, detail="missing_stripe_signature_header")
 
     ts, v1_list = _parse_stripe_sig_header(sig_header)
+    logger.info(f"STRIPE_SIG_DEBUG: ts={ts} v1_count={len(v1_list)} payload_len={len(payload)} sig_header_prefix={sig_header[:60]!r}")
     if ts is None or not v1_list:
+        logger.error("STRIPE_SIG_FAIL: invalid header (no ts or v1)")
         raise HTTPException(status_code=400, detail="invalid_stripe_signature_header")
 
     now = int(time.time())
-    if abs(now - ts) > tolerance_s:
+    drift = abs(now - ts)
+    if drift > tolerance_s:
+        logger.error(f"STRIPE_SIG_FAIL: timestamp drift={drift}s (now={now} ts={ts})")
         raise HTTPException(status_code=400, detail="stripe_signature_timestamp_out_of_tolerance")
 
     expected = _compute_v1(secret, ts, payload)
-    if not any(hmac.compare_digest(expected, v1) for v1 in v1_list):
+    match = any(hmac.compare_digest(expected, v1) for v1 in v1_list)
+    logger.info(f"STRIPE_SIG_DEBUG: expected_prefix={expected[:16]!r} match={match} secret_prefix={secret[:12]!r}")
+    if not match:
+        logger.error("STRIPE_SIG_FAIL: HMAC mismatch")
         raise HTTPException(status_code=400, detail="invalid_stripe_signature")
 
 
