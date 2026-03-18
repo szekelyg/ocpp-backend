@@ -163,7 +163,7 @@ async def start_session(
             },
         )
 
-        return {
+    return {
         "ok": True,
         "ocpp": ocpp_res,
         "hint": "Wait for StartTransaction; session will be created by OCPP handler.",

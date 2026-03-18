@@ -164,8 +164,7 @@ async def _ensure_session_and_remote_start(db: AsyncSession, intent: ChargingInt
         ocpp_res = {"status": "Error", "reason": str(e)}
 
     # TODO (következő kör): email stop_code elküldés
-    # FONTOS: stop_code plaintext-et DB-be nem írunk, csak logba se kéne élesben.
-    logger.info(f"STOP_CODE (TEMP LOG): intent_id={intent.id} session_id={cs.id} code={stop_code}")
+    logger.info(f"Stop code generated for intent_id={intent.id} session_id={cs.id}")
 
     return {"session_id": cs.id, "created": True, "remote_start": ocpp_res, "stop_code": stop_code}
 
@@ -215,9 +214,9 @@ async def stripe_webhook(
     payment_status = data_obj.get("payment_status")
     metadata = data_obj.get("metadata") or {}
 
-    # Stripe oldalról completed, de safety: csak paid esetén induljon
-    if payment_status not in (None, "paid"):  # néha nincs itt, de a completed tipikusan paid
-        logger.warning(f"checkout.session.completed but payment_status={payment_status} event_id={event_id}")
+    # Stripe oldalról completed, de safety: csak explicitly paid esetén induljon
+    if payment_status != "paid":
+        logger.warning(f"checkout.session.completed but payment_status={payment_status!r} event_id={event_id}")
         return {"ok": True}
 
     intent_id_raw = metadata.get("intent_id")
