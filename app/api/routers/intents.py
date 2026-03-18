@@ -51,10 +51,18 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
     if not cp:
         raise HTTPException(status_code=404, detail="ChargePoint not found")
 
-    if (cp.status or "").lower() != "available":
+    # "available"  → autó még nincs bedugva, RemoteStart után a CP Preparing-be megy és vár
+    # "preparing"  → autó már be van dugva, RemoteStart után azonnal indul a töltés
+    # minden más státusz (charging, faulted, offline, stb.) → nem indítható
+    _startable = {"available", "preparing"}
+    if (cp.status or "").lower() not in _startable:
         raise HTTPException(
             status_code=409,
-            detail={"error": "charge_point_not_available", "status": cp.status},
+            detail={
+                "error": "charge_point_not_available",
+                "status": cp.status,
+                "startable_statuses": sorted(_startable),
+            },
         )
 
     # 2) Intent létrehozás DB-ben (CSAK létező oszlopokkal)
