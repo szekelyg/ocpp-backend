@@ -52,7 +52,7 @@ async def start_transaction(cp_id: str, payload: dict) -> Optional[int]:
                 logger.warning(f"StartTransaction: nincs ilyen CP: {cp_id}")
                 return None
 
-                # 0) Ha már van nyitott, de még nem kapott ocpp_transaction_id-t,
+            # 0) Ha már van nyitott, de még nem kapott ocpp_transaction_id-t,
             # akkor azt használjuk (dupla session védelem).
             res_existing = await session.execute(
                 select(ChargeSession)

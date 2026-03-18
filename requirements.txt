@@ -5,3 +5,4 @@ asyncpg
 alembic
 pydantic
 pydantic-settings
+stripe>=7.0

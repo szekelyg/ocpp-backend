@@ -166,7 +166,7 @@ async def _ensure_session_and_remote_start(db: AsyncSession, intent: ChargingInt
     # TODO (következő kör): email stop_code elküldés
     logger.info(f"Stop code generated for intent_id={intent.id} session_id={cs.id}")
 
-    return {"session_id": cs.id, "created": True, "remote_start": ocpp_res, "stop_code": stop_code}
+    return {"session_id": cs.id, "created": True, "remote_start": ocpp_res}
 
 
 # ---------------------------------------------------------------------

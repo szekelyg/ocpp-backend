@@ -69,6 +69,9 @@ export default function SelectedChargerCard({ cp, onModalChange }) {
       const url = data?.checkout_url;
       if (!url) throw new Error("Nem jött checkout_url a backendtől.");
 
+      // Csak Stripe HTTPS URL-t fogadunk el (open redirect védelem)
+      if (!/^https:\/\//i.test(url)) throw new Error("Érvénytelen fizetési URL.");
+
       onModalChange?.(false);
       window.location.href = url;
     } catch (e) {

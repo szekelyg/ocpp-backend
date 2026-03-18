@@ -20,6 +20,10 @@ def compute_status(cp: ChargePoint) -> str:
     now = datetime.now(timezone.utc)
 
     if now - cp.last_seen_at > OFFLINE_TTL:
+        # Ha aktívan tölt, ne jelöljük offline-nak csak azért mert nincs heartbeat
+        # (töltés közben egyes CP-k nem küldenek rendszeres heartbeat-et)
+        if (cp.status or "").lower() == "charging":
+            return "charging"
         return "offline"
 
     return cp.status or "unknown"
