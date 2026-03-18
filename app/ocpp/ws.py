@@ -37,7 +37,7 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
     try:
         while True:
             raw = await ws.receive_text()
-            logger.info(f"OCPP RAW: {raw}")
+            logger.debug(f"OCPP RAW: {raw}")
 
             try:
                 msg = json.loads(raw)

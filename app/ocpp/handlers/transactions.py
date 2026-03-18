@@ -1,9 +1,8 @@
 # app/ocpp/handlers/transactions.py
 from __future__ import annotations
 
-import os
 import logging
-from typing import Any, Optional
+from typing import Optional
 
 from sqlalchemy import and_, select
 from sqlalchemy.orm import selectinload
@@ -11,39 +10,9 @@ from sqlalchemy.orm import selectinload
 from app.db.session import AsyncSessionLocal
 from app.db.models import ChargePoint, ChargeSession
 from app.ocpp.time_utils import parse_ocpp_timestamp, utcnow
+from app.ocpp.ocpp_utils import _as_float, _as_int, _price_huf_per_kwh
 
 logger = logging.getLogger("ocpp")
-
-
-def _as_float(v: Any) -> Optional[float]:
-    try:
-        if v is None:
-            return None
-        if isinstance(v, (int, float)):
-            return float(v)
-        if isinstance(v, str) and v.strip():
-            return float(v.strip())
-    except Exception:
-        return None
-    return None
-
-
-def _as_int(v: Any) -> Optional[int]:
-    if isinstance(v, int):
-        return v
-    f = _as_float(v)
-    return int(f) if f is not None else None
-
-
-def _price_huf_per_kwh() -> Optional[float]:
-    v = os.environ.get("OCPP_PRICE_HUF_PER_KWH")
-    if not v:
-        return None
-    try:
-        x = float(v)
-        return x if x >= 0 else None
-    except Exception:
-        return None
 
 
 def _recalc_energy_and_cost(cs: ChargeSession) -> None:
@@ -83,7 +52,7 @@ async def start_transaction(cp_id: str, payload: dict) -> Optional[int]:
                 logger.warning(f"StartTransaction: nincs ilyen CP: {cp_id}")
                 return None
 
-                # 0) Ha már van nyitott, de még nem kapott ocpp_transaction_id-t,
+            # 0) Ha már van nyitott, de még nem kapott ocpp_transaction_id-t,
             # akkor azt használjuk (dupla session védelem).
             res_existing = await session.execute(
                 select(ChargeSession)

@@ -19,6 +19,8 @@ export default function Home() {
   const [error, setError] = useState("");
 
   const abortRef = useRef(null);
+  // Ha a modal nyitva van, ne írjuk felül az items state-et (ne okozzunk re-rendert)
+  const modalOpenRef = useRef(false);
 
   const refresh = useCallback(async () => {
     if (abortRef.current) abortRef.current.abort();
@@ -38,8 +40,12 @@ export default function Home() {
       if (!res.ok) throw new Error(`API hiba: ${res.status} ${res.statusText}`);
 
       const data = await res.json();
-      setItems(Array.isArray(data) ? data : []);
-      setLastUpdated(new Date());
+
+      // Ha a modal nyitva van, ne okozzunk re-rendert (elveszne a fókusz)
+      if (!modalOpenRef.current) {
+        setItems(Array.isArray(data) ? data : []);
+        setLastUpdated(new Date());
+      }
     } catch (e) {
       if (e?.name === "AbortError") return;
       setError(e?.message || "Ismeretlen hiba");
@@ -179,7 +185,10 @@ export default function Home() {
               </div>
 
               <div className="p-5">
-                <SelectedChargerCard cp={selected} />
+                <SelectedChargerCard
+                  cp={selected}
+                  onModalChange={(open) => { modalOpenRef.current = open; }}
+                />
               </div>
             </div>
 

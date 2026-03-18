@@ -8,7 +8,7 @@ function isAvailable(status) {
   return String(status || "").toLowerCase() === "available";
 }
 
-export default function SelectedChargerCard({ cp }) {
+export default function SelectedChargerCard({ cp, onModalChange }) {
   const [email, setEmail] = useState("");
   const [showPay, setShowPay] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -18,6 +18,18 @@ export default function SelectedChargerCard({ cp }) {
   const canStart = cp && isAvailable(cp.status) && !busy;
 
   if (!cp) return <div className="text-slate-400 text-sm">Nincs kiválasztott töltő.</div>;
+
+  function openModal() {
+    setErr("");
+    setShowPay(true);
+    onModalChange?.(true);
+  }
+
+  function closeModal() {
+    if (busy) return;
+    setShowPay(false);
+    onModalChange?.(false);
+  }
 
   async function startFlow() {
     setErr("");
@@ -57,6 +69,10 @@ export default function SelectedChargerCard({ cp }) {
       const url = data?.checkout_url;
       if (!url) throw new Error("Nem jött checkout_url a backendtől.");
 
+      // Csak Stripe HTTPS URL-t fogadunk el (open redirect védelem)
+      if (!/^https:\/\//i.test(url)) throw new Error("Érvénytelen fizetési URL.");
+
+      onModalChange?.(false);
       window.location.href = url;
     } catch (e) {
       setErr(e?.message || "Hiba történt.");
@@ -94,10 +110,7 @@ export default function SelectedChargerCard({ cp }) {
           type="button"
           className="btn btnPrimary"
           disabled={!canStart}
-          onClick={() => {
-            setErr("");
-            setShowPay(true);
-          }}
+          onClick={openModal}
           title={!isAvailable(cp.status) ? "Csak 'available' státuszban indítható." : ""}
         >
           {busy ? "Indítás..." : "Töltés indítása"}
@@ -126,10 +139,7 @@ export default function SelectedChargerCard({ cp }) {
       <PayModal
         open={showPay}
         busy={busy}
-        onClose={() => {
-          if (busy) return;
-          setShowPay(false);
-        }}
+        onClose={closeModal}
       >
         <div className="text-slate-100 font-semibold text-base">Fizetés indítása</div>
         <div className="mt-1 text-slate-400 text-sm">
@@ -153,10 +163,7 @@ export default function SelectedChargerCard({ cp }) {
           <button
             type="button"
             className="btn btnGhost"
-            onClick={() => {
-              if (busy) return;
-              setShowPay(false);
-            }}
+            onClick={closeModal}
           >
             Mégse
           </button>

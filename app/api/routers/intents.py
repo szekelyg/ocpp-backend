@@ -17,6 +17,11 @@ logger = logging.getLogger("intents")
 
 router = APIRouter(prefix="/intents", tags=["intents"])
 
+# Stripe API key inicializálás egyszer, modulbetöltéskor
+_stripe_key = os.environ.get("STRIPE_SECRET_KEY")
+if _stripe_key:
+    stripe.api_key = _stripe_key
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -67,7 +72,8 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
 
     # 3) Stripe Checkout Session
     try:
-        stripe.api_key = _get_env("STRIPE_SECRET_KEY")
+        if not stripe.api_key:
+            stripe.api_key = _get_env("STRIPE_SECRET_KEY")
         base_url = _get_env("PUBLIC_BASE_URL").rstrip("/")
 
         meta = {

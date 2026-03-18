@@ -5,26 +5,34 @@ import { createPortal } from "react-dom";
 export default function PayModal({ open, onClose, busy, children }) {
   const panelRef = useRef(null);
 
+  // Scroll lock + fókusz: CSAK akkor fut, ha open változik (nem onClose/busy)
+  // Ha ezt nem választjuk szét, akkor minden 5s-es parent re-render (ami új onClose
+  // referenciát hoz létre) újrafuttatná az effectet és panelRef.focus() ellopná
+  // a fókuszt az inputról.
   useEffect(() => {
     if (!open) return;
 
-    // body scroll lock
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
-    // ESC close
+    const id = setTimeout(() => panelRef.current?.focus(), 0);
+
+    return () => {
+      clearTimeout(id);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [open]);
+
+  // ESC billentyű: külön effect, hogy onClose/busy változásra frissüljön
+  // de NE indítsa újra a fókusz-logikát
+  useEffect(() => {
+    if (!open) return;
+
     const onKeyDown = (e) => {
       if (e.key === "Escape" && !busy) onClose();
     };
     window.addEventListener("keydown", onKeyDown);
-
-    // fókusz a panelre
-    setTimeout(() => panelRef.current?.focus(), 0);
-
-    return () => {
-      document.body.style.overflow = prevOverflow;
-      window.removeEventListener("keydown", onKeyDown);
-    };
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onClose, busy]);
 
   if (!open) return null;
@@ -35,7 +43,6 @@ export default function PayModal({ open, onClose, busy, children }) {
       role="dialog"
       aria-modal="true"
       onMouseDown={(e) => {
-        // backdrop click close (csak ha nem busy)
         if (!busy && e.target === e.currentTarget) onClose();
       }}
     >

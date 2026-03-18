@@ -117,7 +117,7 @@ class ChargeSession(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    charge_point_id = Column(Integer, ForeignKey("charge_points.id", ondelete="CASCADE"), nullable=False)
+    charge_point_id = Column(Integer, ForeignKey("charge_points.id", ondelete="CASCADE"), nullable=False, index=True)
 
     connector_id = Column(Integer, nullable=True)  # pl. 1,2,3...
     ocpp_transaction_id = Column(String, unique=True, nullable=True)
@@ -134,7 +134,8 @@ class ChargeSession(Base):
 
     # ÚJ ownership + fizetéshez kötés (MVP login nélkül)
     anonymous_email = Column(String(255), nullable=True)
-    intent_id = Column(Integer, ForeignKey("charging_intents.id", ondelete="SET NULL"), nullable=True)
+    # unique=True: egy intenthez csak egy session jöhet létre (race condition védelem)
+    intent_id = Column(Integer, ForeignKey("charging_intents.id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
     stop_code_hash = Column(String(255), nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
@@ -154,8 +155,8 @@ class MeterSample(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    charge_point_id = Column(Integer, ForeignKey("charge_points.id", ondelete="CASCADE"), nullable=False)
-    session_id = Column(Integer, ForeignKey("charge_sessions.id", ondelete="SET NULL"), nullable=True)
+    charge_point_id = Column(Integer, ForeignKey("charge_points.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_id = Column(Integer, ForeignKey("charge_sessions.id", ondelete="SET NULL"), nullable=True, index=True)
 
     connector_id = Column(Integer, nullable=True)
 
