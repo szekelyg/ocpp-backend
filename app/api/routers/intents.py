@@ -53,8 +53,9 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
 
     # "available"  → autó még nincs bedugva, RemoteStart után a CP Preparing-be megy és vár
     # "preparing"  → autó már be van dugva, RemoteStart után azonnal indul a töltés
+    # "finishing"  → Volite-specifikus: ezt jelenti amikor autó csatlakoztatva van (de még nem tölt)
     # minden más státusz (charging, faulted, offline, stb.) → nem indítható
-    _startable = {"available", "preparing"}
+    _startable = {"available", "preparing", "finishing"}
     if (cp.status or "").lower() not in _startable:
         raise HTTPException(
             status_code=409,

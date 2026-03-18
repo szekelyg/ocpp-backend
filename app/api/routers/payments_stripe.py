@@ -124,11 +124,31 @@ async def _ensure_session_and_remote_start(db: AsyncSession, intent: ChargingInt
     intent.payment_provider_ref = checkout_session_id
     intent.updated_at = utcnow()
 
-    # 1) ha már van session ehhez az intenthez -> csak visszatérünk
+    # 1) ha már van session ehhez az intenthez -> csak visszatérünk (idempotens)
     existing = await _get_existing_session_for_intent(db, intent.id)
     if existing:
         logger.info(f"Webhook idempotent hit: intent_id={intent.id} session_id={existing.id}")
         return {"session_id": existing.id, "created": False}
+
+    # 1b) race condition védelem: ha ugyanerre a CP+connector-ra már van aktív session
+    res_active = await db.execute(
+        select(ChargeSession).where(
+            and_(
+                ChargeSession.charge_point_id == intent.charge_point_id,
+                ChargeSession.connector_id == intent.connector_id,
+                ChargeSession.finished_at.is_(None),
+            )
+        ).limit(1)
+    )
+    active_session = res_active.scalar_one_or_none()
+    if active_session:
+        logger.warning(
+            f"Active session already exists on cp_id={intent.charge_point_id} "
+            f"connector={intent.connector_id} → session_id={active_session.id}, "
+            f"skipping RemoteStart for intent_id={intent.id}"
+        )
+        # Intent visszafizetendő – de ez Stripe-on kezelt (hold, nem charge)
+        return {"session_id": active_session.id, "created": False, "conflict": True}
 
     # 2) új session + stop code
     stop_code = _generate_stop_code()

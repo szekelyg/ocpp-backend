@@ -4,14 +4,14 @@ import StatusBadge from "../ui/StatusBadge";
 import { placeLines, formatHu } from "../../utils/format";
 import PayModal from "../ui/PayModal";
 
-const STARTABLE = new Set(["available", "preparing"]);
+const STARTABLE = new Set(["available", "preparing", "finishing"]);
 
 function isStartable(status) {
   return STARTABLE.has(String(status || "").toLowerCase());
 }
 
-function isPreparing(status) {
-  return String(status || "").toLowerCase() === "preparing";
+function isCarConnected(status) {
+  return ["preparing", "finishing"].includes(String(status || "").toLowerCase());
 }
 
 export default function SelectedChargerCard({ cp, onModalChange }) {
@@ -138,7 +138,7 @@ export default function SelectedChargerCard({ cp, onModalChange }) {
           A töltő szabad. Indítás után csatlakoztassa az autót a töltőhöz.
         </div>
       )}
-      {statusStr === "preparing" && (
+      {(statusStr === "preparing" || statusStr === "finishing") && (
         <div className="hint rounded-xl border-amber-800/50 bg-amber-950/30 text-amber-300">
           Az autó már csatlakoztatva van – a töltés fizetés után azonnal indul.
         </div>
@@ -148,16 +148,16 @@ export default function SelectedChargerCard({ cp, onModalChange }) {
           Ez a töltő már használatban van. Kérjük válasszon másikat.
         </div>
       )}
-      {!["available", "preparing", "charging"].includes(statusStr) && (
+      {!["available", "preparing", "finishing", "charging"].includes(statusStr) && (
         <div className="hint">
-          A töltés indítása csak <b>available</b> vagy <b>preparing</b> státuszban lehetséges.
+          A töltés indítása nem lehetséges ebben az állapotban ({statusStr}).
         </div>
       )}
 
       <PayModal open={showPay} busy={busy} onClose={closeModal}>
         <div className="text-slate-100 font-semibold text-base">Fizetés indítása</div>
         <div className="mt-1 text-slate-400 text-sm">
-          {isPreparing(cp.status)
+          {isCarConnected(cp.status)
             ? "Az autó már csatlakoztatva van – fizetés után azonnal indul a töltés."
             : "Fizetés után csatlakoztassa az autót a töltőhöz."}
         </div>
