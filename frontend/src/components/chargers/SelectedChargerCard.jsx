@@ -4,8 +4,14 @@ import StatusBadge from "../ui/StatusBadge";
 import { placeLines, formatHu } from "../../utils/format";
 import PayModal from "../ui/PayModal";
 
-function isAvailable(status) {
-  return String(status || "").toLowerCase() === "available";
+const STARTABLE = new Set(["available", "preparing"]);
+
+function isStartable(status) {
+  return STARTABLE.has(String(status || "").toLowerCase());
+}
+
+function isPreparing(status) {
+  return String(status || "").toLowerCase() === "preparing";
 }
 
 export default function SelectedChargerCard({ cp, onModalChange }) {
@@ -15,7 +21,7 @@ export default function SelectedChargerCard({ cp, onModalChange }) {
   const [err, setErr] = useState("");
 
   const lines = useMemo(() => (cp ? placeLines(cp) : ["", ""]), [cp]);
-  const canStart = cp && isAvailable(cp.status) && !busy;
+  const canStart = cp && isStartable(cp.status) && !busy;
 
   if (!cp) return <div className="text-slate-400 text-sm">Nincs kiválasztott töltő.</div>;
 
@@ -68,8 +74,6 @@ export default function SelectedChargerCard({ cp, onModalChange }) {
 
       const url = data?.checkout_url;
       if (!url) throw new Error("Nem jött checkout_url a backendtől.");
-
-      // Csak Stripe HTTPS URL-t fogadunk el (open redirect védelem)
       if (!/^https:\/\//i.test(url)) throw new Error("Érvénytelen fizetési URL.");
 
       onModalChange?.(false);
@@ -79,6 +83,8 @@ export default function SelectedChargerCard({ cp, onModalChange }) {
       setBusy(false);
     }
   }
+
+  const statusStr = String(cp.status || "").toLowerCase();
 
   return (
     <div className="space-y-4">
@@ -96,8 +102,7 @@ export default function SelectedChargerCard({ cp, onModalChange }) {
         <div className="detailVal flex items-center gap-3">
           <StatusBadge status={cp.status} />
           <span className="text-xs text-slate-400">
-            (OCPP:{" "}
-            <span className="font-semibold text-slate-200">{String(cp.status || "—")}</span>)
+            (OCPP: <span className="font-semibold text-slate-200">{String(cp.status || "—")}</span>)
           </span>
         </div>
 
@@ -111,7 +116,6 @@ export default function SelectedChargerCard({ cp, onModalChange }) {
           className="btn btnPrimary"
           disabled={!canStart}
           onClick={openModal}
-          title={!isAvailable(cp.status) ? "Csak 'available' státuszban indítható." : ""}
         >
           {busy ? "Indítás..." : "Töltés indítása"}
         </button>
@@ -124,30 +128,45 @@ export default function SelectedChargerCard({ cp, onModalChange }) {
             window.open(`https://www.google.com/maps?q=${cp.latitude},${cp.longitude}`, "_blank");
           }}
         >
-          Megnyitás Google Maps-ben
+          Google Maps
         </button>
       </div>
 
-      {!isAvailable(cp.status) ? (
+      {/* Státusz-specifikus tájékoztató */}
+      {statusStr === "available" && (
         <div className="hint">
-          A töltés indítása csak akkor aktív, ha a státusz <b>available</b>.
+          A töltő szabad. Indítás után csatlakoztassa az autót a töltőhöz.
         </div>
-      ) : (
-        <div className="hint">Indítás: email → Stripe fizetés → webhook → RemoteStartTransaction.</div>
+      )}
+      {statusStr === "preparing" && (
+        <div className="hint rounded-xl border-amber-800/50 bg-amber-950/30 text-amber-300">
+          Az autó már csatlakoztatva van – a töltés fizetés után azonnal indul.
+        </div>
+      )}
+      {statusStr === "charging" && (
+        <div className="hint">
+          Ez a töltő már használatban van. Kérjük válasszon másikat.
+        </div>
+      )}
+      {!["available", "preparing", "charging"].includes(statusStr) && (
+        <div className="hint">
+          A töltés indítása csak <b>available</b> vagy <b>preparing</b> státuszban lehetséges.
+        </div>
       )}
 
-      <PayModal
-        open={showPay}
-        busy={busy}
-        onClose={closeModal}
-      >
+      <PayModal open={showPay} busy={busy} onClose={closeModal}>
         <div className="text-slate-100 font-semibold text-base">Fizetés indítása</div>
         <div className="mt-1 text-slate-400 text-sm">
-          Add meg az emailed. Erre küldjük később a stop kódot / bizonylatot.
+          {isPreparing(cp.status)
+            ? "Az autó már csatlakoztatva van – fizetés után azonnal indul a töltés."
+            : "Fizetés után csatlakoztassa az autót a töltőhöz."}
+        </div>
+        <div className="mt-1 text-slate-500 text-xs">
+          A stop kódot és a bizonylatot erre az emailre küldjük.
         </div>
 
         <div className="mt-4">
-          <label className="block text-xs text-slate-400 mb-2">Email</label>
+          <label className="block text-xs text-slate-400 mb-2">Email cím</label>
           <input
             className="w-full rounded-xl border border-slate-800 bg-slate-900/40 px-3 py-2 text-slate-100 outline-none focus:ring-2 focus:ring-blue-500/40"
             value={email}
@@ -160,21 +179,16 @@ export default function SelectedChargerCard({ cp, onModalChange }) {
         </div>
 
         <div className="mt-5 flex gap-2 justify-end">
-          <button
-            type="button"
-            className="btn btnGhost"
-            onClick={closeModal}
-          >
+          <button type="button" className="btn btnGhost" onClick={closeModal}>
             Mégse
           </button>
-
           <button
             type="button"
             className="btn btnPrimary"
-            disabled={busy || !isAvailable(cp.status)}
+            disabled={busy || !isStartable(cp.status)}
             onClick={startFlow}
           >
-            {busy ? "Átirányítás..." : "Fizetés (5000 Ft)"}
+            {busy ? "Átirányítás..." : "Fizetés (5 000 Ft)"}
           </button>
         </div>
       </PayModal>

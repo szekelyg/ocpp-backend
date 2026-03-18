@@ -6,3 +6,4 @@ alembic
 pydantic
 pydantic-settings
 stripe>=7.0
+httpx>=0.27

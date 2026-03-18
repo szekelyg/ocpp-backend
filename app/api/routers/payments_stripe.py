@@ -18,6 +18,7 @@ from app.db.models import ChargePoint, ChargeSession, ChargingIntent
 from app.db.session import AsyncSessionLocal
 from app.ocpp.registry import remote_start_transaction
 from app.ocpp.time_utils import utcnow
+from app.services.email import send_stop_code_email
 
 logger = logging.getLogger("payments.stripe")
 
@@ -147,9 +148,15 @@ async def _ensure_session_and_remote_start(db: AsyncSession, intent: ChargingInt
     cp = await _load_cp(db, intent.charge_point_id)
     if not cp:
         logger.error(f"ChargePoint not found for intent_id={intent.id} cp_id={intent.charge_point_id}")
-        # itt nem dobunk, mert a payment már megtörtént; majd kezeljük refund/timeout flow-val később
         logger.warning("RemoteStart skipped: missing ChargePoint")
-        return {"session_id": cs.id, "created": True, "remote_start": "skipped_no_cp", "stop_code": stop_code}
+        # Email küldés CP nélkül is – stop kód fontos
+        await send_stop_code_email(
+            to=intent.anonymous_email,
+            stop_code=stop_code,
+            session_id=cs.id,
+            cp_ocpp_id="—",
+        )
+        return {"session_id": cs.id, "created": True, "remote_start": "skipped_no_cp"}
 
     try:
         ocpp_res = await remote_start_transaction(
@@ -159,12 +166,16 @@ async def _ensure_session_and_remote_start(db: AsyncSession, intent: ChargingInt
         )
         logger.info(f"RemoteStart result: intent_id={intent.id} session_id={cs.id} ocpp={ocpp_res}")
     except Exception as e:
-        # payment után ne 500-azzunk webhookban: Stripe retry + log, később retry worker/ops
         logger.exception(f"RemoteStart failed: intent_id={intent.id} session_id={cs.id} err={e}")
         ocpp_res = {"status": "Error", "reason": str(e)}
 
-    # TODO (következő kör): email stop_code elküldés
-    logger.info(f"Stop code generated for intent_id={intent.id} session_id={cs.id}")
+    # Stop kód email – még a plaintext kód birtokában vagyunk
+    await send_stop_code_email(
+        to=intent.anonymous_email,
+        stop_code=stop_code,
+        session_id=cs.id,
+        cp_ocpp_id=cp.ocpp_id,
+    )
 
     return {"session_id": cs.id, "created": True, "remote_start": ocpp_res}
 

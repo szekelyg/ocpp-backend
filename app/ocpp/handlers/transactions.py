@@ -11,6 +11,7 @@ from app.db.session import AsyncSessionLocal
 from app.db.models import ChargePoint, ChargeSession
 from app.ocpp.time_utils import parse_ocpp_timestamp, utcnow
 from app.ocpp.ocpp_utils import _as_float, _as_int, _price_huf_per_kwh
+from app.services.email import send_receipt_email
 
 logger = logging.getLogger("ocpp")
 
@@ -177,6 +178,22 @@ async def stop_transaction(cp_id: str, payload: dict) -> None:
                 f"Session lezárva: id={cs.id} tx={transaction_id} meter_stop_wh={meter_stop} "
                 f"energy_kwh={cs.energy_kwh} cost_huf={cs.cost_huf}"
             )
+
+            # Receipt email – csak ha van email cím (fizetésen keresztül indított session)
+            if cs.anonymous_email:
+                duration_s = None
+                if cs.started_at and cs.finished_at:
+                    start = cs.started_at if cs.started_at.tzinfo else cs.started_at.replace(tzinfo=__import__('datetime').timezone.utc)
+                    end = cs.finished_at if cs.finished_at.tzinfo else cs.finished_at.replace(tzinfo=__import__('datetime').timezone.utc)
+                    duration_s = max(0, int((end - start).total_seconds()))
+                await send_receipt_email(
+                    to=cs.anonymous_email,
+                    session_id=cs.id,
+                    cp_ocpp_id=cp_id,
+                    duration_s=duration_s,
+                    energy_kwh=cs.energy_kwh,
+                    cost_huf=cs.cost_huf,
+                )
 
     except Exception as e:
         logger.exception(f"Hiba StopTransaction mentésekor: {e}")
