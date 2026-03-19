@@ -82,6 +82,7 @@ def _session_to_dict(s: ChargeSession, cp: Optional[ChargePoint] = None) -> dict
         "cost_huf": s.cost_huf,
         "is_active": s.finished_at is None,
         "duration_s": _duration_s(s),
+        "timed_out": s.finished_at is not None and s.ocpp_transaction_id is None,
     }
     if cp is not None:
         result["charge_point"] = {

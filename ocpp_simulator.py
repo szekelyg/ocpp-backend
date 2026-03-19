@@ -137,8 +137,35 @@ class VoltieLikeSimulator:
                 except Exception:
                     continue
 
+                # CALL: [2, uniqueId, action, payload] – szerver → CP
+                if isinstance(msg, list) and len(msg) >= 4 and msg[0] == 2:
+                    uid = msg[1]
+                    srv_action = msg[2]
+                    srv_payload = msg[3] if isinstance(msg[3], dict) else {}
+                    print(f"[SIM] Szerver CALL: {srv_action} uid={uid}")
+
+                    if srv_action == "RemoteStartTransaction":
+                        # Elfogadjuk + automatikusan indítjuk a töltést
+                        result = json.dumps([3, uid, {"status": "Accepted"}])
+                        await self.ws.send(result)
+                        print(f"[SIM] RemoteStartTransaction -> Accepted, töltés indul...")
+                        # Szimulált plug + StartTransaction
+                        asyncio.create_task(self._auto_start_after_remote())
+
+                    elif srv_action == "RemoteStopTransaction":
+                        result = json.dumps([3, uid, {"status": "Accepted"}])
+                        await self.ws.send(result)
+                        print(f"[SIM] RemoteStopTransaction -> Accepted, töltés leáll...")
+                        asyncio.create_task(self._auto_stop_after_remote())
+
+                    else:
+                        # Ismeretlen CALL – Accepted válasz
+                        result = json.dumps([3, uid, {}])
+                        await self.ws.send(result)
+                        print(f"[SIM] Ismeretlen CALL {srv_action} -> üres válasz")
+
                 # CALLRESULT: [3, uniqueId, payload]
-                if isinstance(msg, list) and len(msg) >= 3 and msg[0] == 3:
+                elif isinstance(msg, list) and len(msg) >= 3 and msg[0] == 3:
                     uid = msg[1]
                     payload = msg[2] if isinstance(msg[2], dict) else {}
                     action = self._pending.pop(uid, None)
@@ -241,6 +268,30 @@ class VoltieLikeSimulator:
             payload["transactionId"] = self.state.transaction_id
 
         return payload
+
+    async def _auto_start_after_remote(self) -> None:
+        """RemoteStartTransaction után: Preparing → töltés indul."""
+        await asyncio.sleep(1)
+        self.state.set_plugged(True)
+        self.state.set_charging(False)
+        await self.send_status("Preparing")
+        await asyncio.sleep(1)
+        self.state.set_charging(True)
+        await self.send_start_transaction()
+        await self.send_status("Charging")
+        print("[SIM] Auto-start kész, töltés folyamatban.")
+
+    async def _auto_stop_after_remote(self) -> None:
+        """RemoteStopTransaction után: töltés leáll."""
+        await asyncio.sleep(1)
+        if self.state.charging:
+            self.state.set_charging(False)
+            await self.send_stop_transaction()
+            await self.send_status("Finishing")
+            await asyncio.sleep(1)
+            self.state.set_plugged(False)
+            await self.send_status("Available")
+            print("[SIM] Auto-stop kész.")
 
     async def meter_values_task(self) -> None:
         while not self._stop.is_set():

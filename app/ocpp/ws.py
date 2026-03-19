@@ -109,6 +109,12 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
                 response = [3, unique_id, {"status": "Accepted", "currentTime": iso_utc_now_z(), "interval": 60}]
                 await ws.send_text(json.dumps(response))
 
+            elif action == "Authorize":
+                id_tag = payload.get("idTag", "")
+                logger.info(f"Authorize: cp={cp_id} idTag={id_tag} → Accepted")
+                response = [3, unique_id, {"idTagInfo": {"status": "Accepted"}}]
+                await ws.send_text(json.dumps(response))
+
             elif action == "Heartbeat":
                 await touch_last_seen(cp_id)
                 response = [3, unique_id, {"currentTime": iso_utc_now_z()}]

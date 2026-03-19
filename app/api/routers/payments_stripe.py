@@ -172,7 +172,13 @@ async def _ensure_session_and_remote_start(db: AsyncSession, intent: ChargingInt
     db.add(cs)
     await db.flush()  # kap id-t
 
-    # 3) OCPP remote start (nem atomikusan a DB-vel, de webhook oldalról oké)
+    # KRITIKUS: commit ELŐTT küldjük a RemoteStart-ot!
+    # A Voltie/OCPP töltők azonnal válaszolnak StartTransaction-nel a RemoteStart után.
+    # Ha a session még nincs commitolva, a StartTransaction handler (új DB connection)
+    # nem látja és ÚJ session-t hoz létre → dupla session bug.
+    await db.commit()
+
+    # 3) OCPP remote start
     cp = await _load_cp(db, intent.charge_point_id)
     if not cp:
         logger.error(f"ChargePoint not found for intent_id={intent.id} cp_id={intent.charge_point_id}")

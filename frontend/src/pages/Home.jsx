@@ -110,19 +110,6 @@ export default function Home() {
             <p className="text-slate-400 text-sm">Térkép • Töltők • Fizetés + indítás</p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="text-sm bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl">
-              Utolsó frissítés: {lastUpdated ? lastUpdated.toLocaleString("hu-HU") : "—"}
-            </div>
-
-            <button
-              onClick={refresh}
-              disabled={loading}
-              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed transition"
-            >
-              {loading ? "Frissítés…" : "Frissítés"}
-            </button>
-          </div>
         </div>
 
         {/* ERROR BANNER */}

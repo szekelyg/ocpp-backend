@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import StatusBadge from "../components/ui/StatusBadge";
 import PayModal from "../components/ui/PayModal";
 
 const POLL_MS = 3_000;
+const WAITING_TIMEOUT_S = 15 * 60; // 15 perc – ha az autó nem csatlakozik, timeout
+const REDIRECT_DELAY_S = 10;
 
 function formatDuration(s) {
   if (s == null || s < 0) return "—";
@@ -17,17 +19,23 @@ function formatDuration(s) {
 
 function phaseof(session) {
   if (!session) return null;
-  if (session.finished_at) return "finished";
+  if (session.finished_at) {
+    if (session.timed_out) return "timeout";
+    return "finished";
+  }
   if (session.ocpp_transaction_id) return "charging";
+  if ((session.duration_s ?? 0) >= WAITING_TIMEOUT_S) return "timeout";
   return "waiting";
 }
 
 export default function ChargingPage() {
   const { sessionId } = useParams();
+  const navigate = useNavigate();
 
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [fetchErr, setFetchErr] = useState("");
+  const [redirectCountdown, setRedirectCountdown] = useState(null);
 
   const [showStop, setShowStop] = useState(false);
   const [stopCode, setStopCode] = useState("");
@@ -55,6 +63,20 @@ export default function ChargingPage() {
     const t = setInterval(fetchSession, POLL_MS);
     return () => clearInterval(t);
   }, [fetchSession]);
+
+  // Ha timeout fázisba kerül, indítunk egy visszaszámlálót és átirányítunk
+  useEffect(() => {
+    if (phaseof(session) !== "timeout") return;
+    if (redirectCountdown !== null) return; // már fut
+    setRedirectCountdown(REDIRECT_DELAY_S);
+  }, [session, redirectCountdown]);
+
+  useEffect(() => {
+    if (redirectCountdown === null) return;
+    if (redirectCountdown <= 0) { navigate("/"); return; }
+    const t = setTimeout(() => setRedirectCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [redirectCountdown, navigate]);
 
   async function doStop() {
     const code = stopCode.trim().toUpperCase();
@@ -141,6 +163,20 @@ export default function ChargingPage() {
             <div className="text-sm text-amber-300/80 mt-0.5">
               Dugja be az autót a töltőbe a töltés megkezdéséhez.
             </div>
+          </div>
+        )}
+        {phase === "timeout" && (
+          <div className="rounded-2xl border border-red-700/60 bg-red-900/20 px-4 py-3 space-y-1">
+            <div className="font-semibold text-red-300">✕ Töltés nem indult el</div>
+            <div className="text-sm text-red-300/80">
+              Az autó 15 percen belül nem csatlakozott. A munkamenet lezárult,
+              a befizetett összeg visszatérítése folyamatban van.
+            </div>
+            {redirectCountdown !== null && (
+              <div className="text-xs text-slate-400 pt-1">
+                Átirányítás a főoldalra {redirectCountdown} másodperc múlva…
+              </div>
+            )}
           </div>
         )}
         {phase === "charging" && (

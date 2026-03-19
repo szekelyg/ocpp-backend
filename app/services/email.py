@@ -166,6 +166,43 @@ async def send_stop_code_email(
     )
 
 
+async def send_no_start_email(
+    to: str,
+    session_id: int,
+    cp_ocpp_id: str = "—",
+) -> bool:
+    """Töltés nem indult el (autó nem csatlakozott időben) – értesítés + visszatérítés."""
+    body = f"""
+    <h2 style="margin:0 0 8px;font-size:20px;color:#f1f5f9;">Töltés nem indult el</h2>
+    <p style="margin:0 0 20px;color:#94a3b8;font-size:14px;">
+      A töltő (<strong style="color:#e2e8f0;">{cp_ocpp_id}</strong>) 15 percen belül
+      nem kapott csatlakozást. A munkamenet automatikusan lezárult.
+    </p>
+
+    <div style="background:#0f172a;border:1px solid #92400e;border-radius:12px;padding:16px 24px;
+                margin-bottom:20px;">
+      <p style="margin:0;font-size:14px;color:#fbbf24;font-weight:600;">
+        💳 A befizetett összeg visszatérítése folyamatban van.
+      </p>
+      <p style="margin:8px 0 0;font-size:12px;color:#94a3b8;">
+        A visszautalás általában 1–5 munkanapot vesz igénybe, a bankjától függően.
+        Ha ezután sem látja a jóváírást, kérjük vegye fel velünk a kapcsolatot.
+      </p>
+    </div>
+
+    <table cellpadding="0" cellspacing="0" style="width:100%;">
+      {_stat("Töltő azonosító", cp_ocpp_id)}
+      {_stat("Session ID", str(session_id))}
+    </table>
+    """
+
+    return await _send(
+        to=to,
+        subject="⚠️ Töltés nem indult el – visszatérítés folyamatban",
+        html=_wrap("Töltés nem indult el", body),
+    )
+
+
 async def send_receipt_email(
     to: str,
     session_id: int,
