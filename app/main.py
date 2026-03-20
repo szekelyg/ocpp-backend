@@ -30,30 +30,46 @@ _WAITING_TIMEOUT_MINUTES = 15
 _CHARGING_STALE_CP_MINUTES = 30
 
 
-async def _try_stripe_refund(checkout_session_id: str, charge_session_id: int) -> None:
-    """Refund the Stripe payment for a timed-out session (runs in thread pool)."""
+async def _try_stripe_cancel_or_refund(checkout_session_id: str, charge_session_id: int) -> None:
+    """
+    Timeout esetén felszabadítja a Stripe zárolást:
+    - Ha a PaymentIntent még nincs capture-ölve (requires_capture) → cancel() = zárolás felszabadítás
+    - Ha már capture-ölve van (succeeded) → Refund.create() = visszatérítés
+    """
     stripe_key = os.environ.get("STRIPE_SECRET_KEY")
     if not stripe_key:
-        logger.warning(f"STRIPE_SECRET_KEY not set – skipping refund for session_id={charge_session_id}")
+        logger.warning(f"STRIPE_SECRET_KEY not set – skipping Stripe cleanup for session_id={charge_session_id}")
         return
 
-    def _do() -> str | None:
+    def _do() -> str:
         import stripe as _stripe
         _stripe.api_key = stripe_key
         cs = _stripe.checkout.Session.retrieve(checkout_session_id)
         pi_id = cs.get("payment_intent")
         if not pi_id:
             logger.warning(f"No payment_intent in checkout session {checkout_session_id}")
-            return None
-        refund = _stripe.Refund.create(payment_intent=pi_id)
-        return refund.get("id")
+            return "no_pi"
+        pi = _stripe.PaymentIntent.retrieve(pi_id)
+        status = pi.get("status")
+        if status == "requires_capture":
+            # Csak zárolva volt, még nem vonták le – cancel = azonnali felszabadítás
+            _stripe.PaymentIntent.cancel(pi_id)
+            logger.info(f"Stripe PI cancelled (timeout): pi={pi_id} session_id={charge_session_id}")
+            return "cancelled"
+        elif status == "succeeded":
+            # Már levonták (nem kellene, de kezeljük) → visszatérítés
+            refund = _stripe.Refund.create(payment_intent=pi_id)
+            logger.info(f"Stripe refund created: refund_id={refund.get('id')} session_id={charge_session_id}")
+            return "refunded"
+        else:
+            logger.info(f"Stripe PI status={status}, no action needed: pi={pi_id} session_id={charge_session_id}")
+            return f"noop:{status}"
 
     try:
-        refund_id = await asyncio.to_thread(_do)
-        if refund_id:
-            logger.info(f"Stripe refund created: refund_id={refund_id} session_id={charge_session_id}")
+        result = await asyncio.to_thread(_do)
+        logger.info(f"Stripe timeout cleanup result={result} session_id={charge_session_id}")
     except Exception:
-        logger.exception(f"Stripe refund failed for session_id={charge_session_id}")
+        logger.exception(f"Stripe timeout cleanup failed for session_id={charge_session_id}")
 
 
 async def _expire_waiting_sessions_once() -> None:
@@ -98,7 +114,7 @@ async def _expire_waiting_sessions_once() -> None:
 
         # Stripe refund
         if cs.intent and cs.intent.payment_provider == "stripe" and cs.intent.payment_provider_ref:
-            await _try_stripe_refund(cs.intent.payment_provider_ref, cs.id)
+            await _try_stripe_cancel_or_refund(cs.intent.payment_provider_ref, cs.id)
 
         # Email
         if cs.anonymous_email:
@@ -128,6 +144,7 @@ async def _expire_stale_charging_sessions_once() -> None:
             select(ChargeSession)
             .join(ChargePoint, ChargeSession.charge_point_id == ChargePoint.id)
             .options(selectinload(ChargeSession.charge_point))
+            .options(selectinload(ChargeSession.intent))
             .where(
                 and_(
                     ChargeSession.finished_at.is_(None),
@@ -174,6 +191,18 @@ async def _expire_stale_charging_sessions_once() -> None:
             if cp_row and cp_row.status == "charging":
                 cp_row.status = "available"
             await db.commit()
+
+        # Stripe capture vagy cancel a tényleges energia alapján
+        if cs.intent and cs.intent.payment_provider == "stripe":
+            from app.ocpp.handlers.transactions import _stripe_settle as _settle
+            # Frissített session objektum szükséges a settle-hez
+            async with AsyncSessionLocal() as db2:
+                from app.db.models import ChargeSession as CS2
+                fresh = (await db2.execute(
+                    select(CS2).options(selectinload(CS2.intent)).where(CS2.id == cs.id)
+                )).scalar_one_or_none()
+                if fresh:
+                    await _settle(fresh)
 
         if cs.anonymous_email and finished_at_val is not None:
             duration_s = None
