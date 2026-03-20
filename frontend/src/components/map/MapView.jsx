@@ -6,9 +6,42 @@ import {
   useMap,
   useMapEvents,
 } from "react-leaflet";
+import L from "leaflet";
 import { useEffect, useMemo, useRef } from "react";
 import StatusBadge from "../ui/StatusBadge";
 import { placeLines } from "../../utils/format";
+
+// Státusz → szín
+const STATUS_COLOR = {
+  available:     "#22c55e", // zöld
+  charging:      "#3b82f6", // kék
+  preparing:     "#f59e0b", // sárga
+  finishing:     "#f59e0b", // sárga
+  faulted:       "#ef4444", // piros
+  unavailable:   "#ef4444", // piros
+  reserved:      "#a855f7", // lila
+  offline:       "#6b7280", // szürke
+};
+
+function statusColor(status) {
+  return STATUS_COLOR[String(status || "").toLowerCase()] || "#6b7280";
+}
+
+function makeIcon(color) {
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 28 36">
+      <path d="M14 0C6.27 0 0 6.27 0 14c0 9.33 14 22 14 22S28 23.33 28 14C28 6.27 21.73 0 14 0z"
+            fill="${color}" stroke="white" stroke-width="1.5"/>
+      <circle cx="14" cy="14" r="6" fill="white" opacity="0.9"/>
+    </svg>`.trim();
+  return L.divIcon({
+    html: svg,
+    className: "",
+    iconSize: [28, 36],
+    iconAnchor: [14, 36],
+    popupAnchor: [0, -36],
+  });
+}
 
 // In-memory view cache (page refreshig él)
 const viewCache = {
@@ -135,6 +168,7 @@ export default function MapView({ points = [], onSelect, onStartFlow }) {
           <Marker
             key={cp.id}
             position={[cp.latitude, cp.longitude]}
+            icon={makeIcon(statusColor(cp.status))}
             eventHandlers={{ click: () => onSelect(cp.id) }}
           >
             <Popup>
