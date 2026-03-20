@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -18,41 +17,8 @@ from app.ocpp.ocpp_ws import remote_start_transaction, remote_stop_transaction
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
-# ---------------------------------------------------------------------------
-# Stop code rate limiting (in-memory, single-process MVP)
-# ---------------------------------------------------------------------------
-_STOP_ATTEMPTS: dict[int, list[datetime]] = {}
-_MAX_STOP_ATTEMPTS = 5
-_STOP_WINDOW_S = 600  # 10 perc
-
-
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _check_and_record_stop_attempt(session_id: int) -> None:
-    now = _utcnow()
-    history = [
-        t for t in _STOP_ATTEMPTS.get(session_id, [])
-        if (now - t).total_seconds() < _STOP_WINDOW_S
-    ]
-    if len(history) >= _MAX_STOP_ATTEMPTS:
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "error": "too_many_attempts",
-                "hint": "Túl sok sikertelen kísérlet. Próbáld újra 10 perc múlva.",
-            },
-        )
-    history.append(now)
-    _STOP_ATTEMPTS[session_id] = history
-
-
-def _verify_stop_code(session: ChargeSession, code: str) -> bool:
-    if not session.stop_code_hash:
-        return False
-    h = hashlib.sha256(code.upper().strip().encode("utf-8")).hexdigest()
-    return h == session.stop_code_hash
 
 
 # ---------------------------------------------------------------------------
@@ -133,9 +99,6 @@ class StartSessionIn(BaseModel):
 class StopSessionIn(BaseModel):
     session_id: int = Field(..., ge=1)
 
-
-class StopWithCodeIn(BaseModel):
-    stop_code: str = Field(..., min_length=1, max_length=16)
 
 
 # ---------------------------------------------------------------------------
@@ -299,15 +262,11 @@ async def get_session(
 
 
 @router.post("/{session_id}/stop", response_model=dict)
-async def stop_session_with_code(
+async def stop_session_public(
     session_id: int,
-    body: StopWithCodeIn,
     db: AsyncSession = Depends(get_db),
 ):
-    """Publikus stop – stop_code ellenőrzéssel + rate limittel."""
-    # Rate limit ellenőrzés (minden próbálkozásnál, sikeres előtt)
-    _check_and_record_stop_attempt(session_id)
-
+    """Publikus stop – kód nélkül, egyszerű leállítás."""
     res = await db.execute(
         select(ChargeSession)
         .options(selectinload(ChargeSession.charge_point))
@@ -319,19 +278,6 @@ async def stop_session_with_code(
 
     if s.finished_at is not None:
         return {"ok": True, "already_finished": True, "session": _session_to_dict(s, s.charge_point)}
-
-    # Stop code ellenőrzés
-    if not _verify_stop_code(s, body.stop_code):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "error": "invalid_stop_code",
-                "hint": "Helytelen stop kód. Ellenőrizd az emailben kapott kódot.",
-            },
-        )
-
-    # Sikeres auth → töröljük a rate limit előzményt
-    _STOP_ATTEMPTS.pop(session_id, None)
 
     if not s.charge_point:
         raise HTTPException(status_code=500, detail="Session has no charge_point")

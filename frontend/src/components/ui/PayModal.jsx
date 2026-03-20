@@ -47,11 +47,11 @@ export default function PayModal({ open, onClose, busy, children }) {
       }}
     >
       <div className="absolute inset-0 bg-black/60" />
-      <div className="relative h-full w-full flex items-center justify-center p-4">
+      <div className="relative h-full w-full flex items-start justify-center p-4 overflow-y-auto">
         <div
           ref={panelRef}
           tabIndex={-1}
-          className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950 p-5 shadow-xl outline-none"
+          className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950 p-5 shadow-xl outline-none my-auto"
         >
           {children}
         </div>

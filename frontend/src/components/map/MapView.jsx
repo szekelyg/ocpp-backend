@@ -101,7 +101,9 @@ function FitInitialBounds({ points }) {
   return null;
 }
 
-export default function MapView({ points = [], onSelect }) {
+const STARTABLE = new Set(["available", "preparing", "finishing"]);
+
+export default function MapView({ points = [], onSelect, onStartFlow }) {
   const centerFallback = [47.49, 18.94];
 
   const mappable = useMemo(() => {
@@ -137,10 +139,18 @@ export default function MapView({ points = [], onSelect }) {
           >
             <Popup>
               <div className="space-y-2 text-sm">
-                <div className="font-semibold">{cp.ocpp_id}</div>
+                <div className="font-semibold">{cp.location_name || cp.ocpp_id}</div>
                 <StatusBadge status={cp.status} />
                 <div>{lines[0]}</div>
                 {lines[1] ? <div className="text-slate-500">{lines[1]}</div> : null}
+                {STARTABLE.has(String(cp.status || "").toLowerCase()) && (
+                  <button
+                    onClick={() => { onSelect(cp.id); onStartFlow?.(cp.id); }}
+                    className="mt-1 w-full text-center bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold py-1.5 px-3 rounded-lg"
+                  >
+                    ⚡ Töltés indítása
+                  </button>
+                )}
               </div>
             </Popup>
           </Marker>

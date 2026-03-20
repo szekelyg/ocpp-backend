@@ -1,8 +1,23 @@
 import { useMemo } from "react";
 import ChargerListItem from "./ChargerListItem";
 
+const STATUS_PRIORITY = {
+  available: 0,
+  preparing: 1,
+  finishing: 1,
+  charging: 2,
+};
+
+function statusPriority(status) {
+  const s = String(status || "").toLowerCase();
+  return s in STATUS_PRIORITY ? STATUS_PRIORITY[s] : 3; // offline/hiba/ismeretlen → legvégére
+}
+
 export default function ChargerList({ items, selectedId, onSelect }) {
-  const list = useMemo(() => items || [], [items]);
+  const list = useMemo(
+    () => [...(items || [])].sort((a, b) => statusPriority(a.status) - statusPriority(b.status)),
+    [items]
+  );
 
   if (!list.length) {
     return (

@@ -5,15 +5,12 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 
-from fastapi import FastAPI, Depends, HTTPException, WebSocket
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import and_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlalchemy import text
 
-from app.api.deps import get_db
 from app.api.routers.charge_points import router as charge_points_router
 from app.api.routers.sessions import router as sessions_router
 from app.api.routers.payments_stripe import router as payments_stripe_router
@@ -28,6 +25,9 @@ logging.basicConfig(level=logging.INFO)
 # ---------------------------------------------------------------------------
 
 _WAITING_TIMEOUT_MINUTES = 15
+# Ha a töltő ennyi perce nem jelentkezett (last_seen_at), de van nyitott charging session,
+# akkor azt lezárjuk (a töltő kiesett, és StopTransaction soha nem érkezett).
+_CHARGING_STALE_CP_MINUTES = 30
 
 
 async def _try_stripe_refund(checkout_session_id: str, charge_session_id: int) -> None:
@@ -110,6 +110,88 @@ async def _expire_waiting_sessions_once() -> None:
             )
 
 
+async def _expire_stale_charging_sessions_once() -> None:
+    """
+    Ha egy töltő ennyi perce nem jelentkezett (last_seen_at), de van nyitott charging session
+    (ocpp_transaction_id IS NOT NULL, finished_at IS NULL), lezárjuk a sessiont.
+    Ez kezeli azt az esetet, amikor a töltő kiesik és StopTransaction soha nem érkezik.
+    """
+    from app.db.session import AsyncSessionLocal
+    from app.db.models import ChargeSession, ChargePoint
+    from app.ocpp.time_utils import utcnow
+    from app.services.email import send_receipt_email
+
+    cp_cutoff = utcnow() - timedelta(minutes=_CHARGING_STALE_CP_MINUTES)
+
+    async with AsyncSessionLocal() as db:
+        res = await db.execute(
+            select(ChargeSession)
+            .join(ChargePoint, ChargeSession.charge_point_id == ChargePoint.id)
+            .options(selectinload(ChargeSession.charge_point))
+            .where(
+                and_(
+                    ChargeSession.finished_at.is_(None),
+                    ChargeSession.ocpp_transaction_id.isnot(None),
+                    ChargePoint.last_seen_at < cp_cutoff,
+                )
+            )
+        )
+        sessions = res.scalars().all()
+
+    for cs in sessions:
+        cp_ocpp_id = cs.charge_point.ocpp_id if cs.charge_point else "—"
+        logger.warning(
+            f"StaleChargingTimeout: session_id={cs.id} cp={cp_ocpp_id} "
+            f"started_at={cs.started_at} – töltő {_CHARGING_STALE_CP_MINUTES} perce offline, session lezárása"
+        )
+        finished_at_val = None
+        energy_kwh_val = None
+        cost_huf_val = None
+
+        async with AsyncSessionLocal() as db:
+            from app.db.models import ChargeSession as CS, ChargePoint as CP
+            from app.ocpp.time_utils import utcnow as _now
+            from app.ocpp.ocpp_utils import _price_huf_per_kwh
+            row = (await db.execute(
+                select(CS).where(CS.id == cs.id)
+            )).scalar_one_or_none()
+            if row is None or row.finished_at is not None:
+                continue  # már le lett zárva
+            finished_at_val = _now()
+            row.finished_at = finished_at_val
+            # energy/cost: ha van meter_stop_wh (live update töltötte be), számoljuk ki
+            if row.meter_start_wh is not None and row.meter_stop_wh is not None:
+                diff = float(row.meter_stop_wh) - float(row.meter_start_wh)
+                if diff >= 0:
+                    row.energy_kwh = diff / 1000.0
+                    energy_kwh_val = row.energy_kwh
+            price = _price_huf_per_kwh()
+            if price is not None and row.energy_kwh is not None:
+                row.cost_huf = float(row.energy_kwh) * float(price)
+                cost_huf_val = row.cost_huf
+            # CP státusz visszaállítása (ha még charging-en áll)
+            cp_row = (await db.execute(select(CP).where(CP.id == row.charge_point_id))).scalar_one_or_none()
+            if cp_row and cp_row.status == "charging":
+                cp_row.status = "available"
+            await db.commit()
+
+        if cs.anonymous_email and finished_at_val is not None:
+            duration_s = None
+            if cs.started_at:
+                from datetime import timezone as _tz
+                s = cs.started_at if cs.started_at.tzinfo else cs.started_at.replace(tzinfo=_tz.utc)
+                e = finished_at_val if finished_at_val.tzinfo else finished_at_val.replace(tzinfo=_tz.utc)
+                duration_s = max(0, int((e - s).total_seconds()))
+            await send_receipt_email(
+                to=cs.anonymous_email,
+                session_id=cs.id,
+                cp_ocpp_id=cp_ocpp_id,
+                duration_s=duration_s,
+                energy_kwh=energy_kwh_val,
+                cost_huf=cost_huf_val,
+            )
+
+
 async def _waiting_timeout_loop() -> None:
     logger.info("WaitingTimeout background task started")
     while True:
@@ -118,6 +200,10 @@ async def _waiting_timeout_loop() -> None:
             await _expire_waiting_sessions_once()
         except Exception:
             logger.exception("WaitingTimeout task error")
+        try:
+            await _expire_stale_charging_sessions_once()
+        except Exception:
+            logger.exception("StaleChargingTimeout task error")
 
 
 @asynccontextmanager
@@ -139,18 +225,6 @@ app.include_router(charge_points_router, prefix="/api")
 app.include_router(sessions_router, prefix="/api")
 app.include_router(payments_stripe_router, prefix="/api")
 app.include_router(intents_router, prefix="/api")
-
-
-@app.get("/test/db-test")
-async def db_test(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(text("SELECT 1"))
-    value = result.scalar_one()
-    return {"db": value}
-
-
-@app.get("/test/ping")
-async def ping():
-    return {"status": "ok"}
 
 
 # OCPP WebSocket endpoint – ID-val a path-ban

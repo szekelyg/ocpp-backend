@@ -2,10 +2,10 @@
 """
 Email küldés Resend API-on keresztül (https://resend.com).
 
-Konfig .env-ben:
+Konfig /etc/ocpp-backend.env-ben:
   RESEND_API_KEY=re_xxxxxxxxxxxx
-  RESEND_FROM=service@energiafelho.hu     (opcionális, ez az alapértelmezett)
-  PUBLIC_BASE_URL=https://energiafelho.hu (session link generáláshoz)
+  RESEND_FROM=szerviz@energiafelho.hu     (opcionális, ez az alapértelmezett)
+  PUBLIC_BASE_URL=https://ev.napos.hu (session link generáláshoz)
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ _RESEND_URL = "https://api.resend.com/emails"
 
 async def _send(to: str, subject: str, html: str) -> bool:
     api_key = os.environ.get("RESEND_API_KEY")
-    from_addr = os.environ.get("RESEND_FROM", "service@energiafelho.hu")
+    from_addr = os.environ.get("RESEND_FROM", "szerviz@energiafelho.hu")
 
     if not api_key:
         logger.warning("RESEND_API_KEY nincs beállítva – email nem lett elküldve")
@@ -87,7 +87,7 @@ def _wrap(title: str, body: str) -> str:
           <td style="padding:16px 28px;border-top:1px solid #334155;">
             <p style="margin:0;font-size:12px;color:#64748b;">
               Ez egy automatikus értesítés. Kérdés esetén írj a
-              <a href="mailto:service@energiafelho.hu" style="color:#60a5fa;">service@energiafelho.hu</a>
+              <a href="mailto:szerviz@energiafelho.hu" style="color:#60a5fa;">szerviz@energiafelho.hu</a>
               címre.
             </p>
           </td>
@@ -120,13 +120,12 @@ def _stat(label: str, value: str) -> str:
 # Publikus küldő függvények
 # ---------------------------------------------------------------------------
 
-async def send_stop_code_email(
+async def send_charging_started_email(
     to: str,
-    stop_code: str,
     session_id: int,
     cp_ocpp_id: str = "—",
 ) -> bool:
-    """Töltés indult – stop kód + link."""
+    """Töltés indult – értesítő email."""
     session_url = f"{_base_url()}/charging/{session_id}"
 
     body = f"""
@@ -135,17 +134,6 @@ async def send_stop_code_email(
       A töltő (<strong style="color:#e2e8f0;">{cp_ocpp_id}</strong>) fogadta a kérést.
       Ha az autó már be van dugva, a töltés azonnal indul – egyébként csatlakoztassa most.
     </p>
-
-    <div style="background:#0f172a;border:1px solid #334155;border-radius:12px;padding:20px 24px;
-                text-align:center;margin-bottom:20px;">
-      <p style="margin:0 0 6px;font-size:12px;color:#64748b;text-transform:uppercase;
-                letter-spacing:1px;">Stop kód</p>
-      <span style="font-family:monospace;font-size:36px;font-weight:700;
-                   letter-spacing:8px;color:#60a5fa;">{stop_code}</span>
-      <p style="margin:8px 0 0;font-size:12px;color:#64748b;">
-        Ezt a kódot tárold el – ezzel tudod leállítani a töltést.
-      </p>
-    </div>
 
     <table cellpadding="0" cellspacing="0" style="width:100%;">
       {_stat("Töltő azonosító", cp_ocpp_id)}
@@ -161,7 +149,7 @@ async def send_stop_code_email(
 
     return await _send(
         to=to,
-        subject=f"⚡ Stop kód: {stop_code} – Energia Felhő töltés",
+        subject="⚡ Töltés elindult – Energia Felhő",
         html=_wrap("Töltés elindult", body),
     )
 
@@ -210,6 +198,14 @@ async def send_receipt_email(
     duration_s: Optional[int] = None,
     energy_kwh: Optional[float] = None,
     cost_huf: Optional[float] = None,
+    billing_name: Optional[str] = None,
+    billing_type: Optional[str] = None,
+    billing_company: Optional[str] = None,
+    billing_tax_number: Optional[str] = None,
+    billing_street: Optional[str] = None,
+    billing_zip: Optional[str] = None,
+    billing_city: Optional[str] = None,
+    billing_country: Optional[str] = None,
 ) -> bool:
     """Töltés befejezve – bizonylat."""
 
@@ -226,6 +222,36 @@ async def send_receipt_email(
 
     energy_str = f"{energy_kwh:.3f} kWh" if energy_kwh is not None else "—"
     cost_str = f"{int(round(cost_huf)):,} Ft".replace(",", "\u202f") if cost_huf is not None else "—"
+
+    # Számlázási szekció összerakása
+    billing_rows = ""
+    if billing_name:
+        billing_rows += _stat("Név", billing_name)
+    if billing_type == "business" and billing_company:
+        billing_rows += _stat("Cégnév", billing_company)
+    if billing_type == "business" and billing_tax_number:
+        billing_rows += _stat("Adószám", billing_tax_number)
+    addr_parts = " ".join(filter(None, [billing_zip, billing_city]))
+    if billing_street:
+        addr_parts = billing_street + (f", {addr_parts}" if addr_parts else "")
+    if billing_country and billing_country != "HU":
+        addr_parts += f" ({billing_country})"
+    if addr_parts:
+        billing_rows += _stat("Cím", addr_parts)
+
+    billing_section = ""
+    if billing_rows:
+        billing_section = f"""
+    <p style="margin:24px 0 8px;font-size:13px;font-weight:600;color:#94a3b8;
+              text-transform:uppercase;letter-spacing:0.05em;">Számlázási adatok</p>
+    <table cellpadding="0" cellspacing="0"
+           style="width:100%;background:#0f172a;border:1px solid #334155;
+                  border-radius:12px;padding:4px 16px;">
+      <tbody>{billing_rows}</tbody>
+    </table>
+    <p style="margin:8px 0 0;font-size:12px;color:#64748b;">
+      A számla ezekre az adatokra kerül kiállításra.
+    </p>"""
 
     body = f"""
     <h2 style="margin:0 0 8px;font-size:20px;color:#f1f5f9;">Töltés befejezve</h2>
@@ -244,6 +270,8 @@ async def send_receipt_email(
         {_stat("Összeg", cost_str)}
       </tbody>
     </table>
+
+    {billing_section}
 
     <p style="margin:20px 0 0;font-size:12px;color:#64748b;">
       A tényleges elszámolás az OCPP mérési adatok alapján történik.

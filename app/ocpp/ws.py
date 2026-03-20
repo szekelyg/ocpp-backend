@@ -1,6 +1,7 @@
 # app/ocpp/ws.py
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Optional, Any
@@ -14,12 +15,14 @@ from app.ocpp.registry import (
     register_ws,
     unregister_ws_if_same,
     pending_get,
+    change_configuration,
 )
 from app.ocpp.handlers.boot import upsert_charge_point_from_boot
 from app.ocpp.handlers.heartbeat import touch_last_seen
 from app.ocpp.handlers.status import save_status_notification
 from app.ocpp.handlers.transactions import start_transaction, stop_transaction
 from app.ocpp.handlers.meter import save_meter_values
+from app.ocpp.handlers.reconnect import retry_pending_remote_start
 
 logger = logging.getLogger("ocpp")
 
@@ -108,6 +111,12 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
                 await upsert_charge_point_from_boot(cp_id, payload)
                 response = [3, unique_id, {"status": "Accepted", "currentTime": iso_utc_now_z(), "interval": 60}]
                 await ws.send_text(json.dumps(response))
+                # Reconnect után megnézzük van-e pending session (nem blokkol)
+                asyncio.create_task(retry_pending_remote_start(cp_id))
+                # MeterValues intervallum csökkentése 15 mp-re (alapból ~60s)
+                asyncio.create_task(_set_meter_interval(cp_id, 15))
+                # Egyedi megjelenítési szöveg beállítása (ha van OCPP_DISPLAY_TEXT env)
+                asyncio.create_task(_set_display_text(cp_id))
 
             elif action == "Authorize":
                 id_tag = payload.get("idTag", "")
@@ -158,3 +167,35 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
         if cp_id:
             await unregister_ws_if_same(cp_id, ws)
         logger.info(f"OCPP cleanup kész (cp_id={cp_id})")
+
+
+async def _set_display_text(cp_id: str) -> None:
+    """DisplayCustomRfidText beállítása env változóból."""
+    import os
+    text = os.environ.get("OCPP_DISPLAY_TEXT", "").strip()
+    if not text:
+        return
+    try:
+        res = await change_configuration(cp_id, "DisplayCustomRfidText", text)
+        status = (res or {}).get("status", "Unknown")
+        if status == "Accepted":
+            logger.info(f"DisplayCustomRfidText beállítva: cp={cp_id}")
+        else:
+            logger.warning(f"DisplayCustomRfidText visszautasítva: cp={cp_id} status={status}")
+    except Exception as e:
+        logger.warning(f"DisplayCustomRfidText beállítás sikertelen: cp={cp_id} err={e}")
+
+
+async def _set_meter_interval(cp_id: str, interval_s: int) -> None:
+    """ChangeConfiguration – MeterValueSampleInterval beállítása."""
+    try:
+        res = await change_configuration(cp_id, "MeterValueSampleInterval", str(interval_s))
+        status = (res or {}).get("status", "Unknown")
+        if status == "Accepted":
+            logger.info(f"MeterValueSampleInterval={interval_s}s beállítva: cp={cp_id}")
+        elif status == "RebootRequired":
+            logger.info(f"MeterValueSampleInterval={interval_s}s – töltő újraindítást kér: cp={cp_id}")
+        else:
+            logger.warning(f"MeterValueSampleInterval beállítás visszautasítva: cp={cp_id} status={status}")
+    except Exception as e:
+        logger.warning(f"MeterValueSampleInterval beállítás sikertelen: cp={cp_id} err={e}")

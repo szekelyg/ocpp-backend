@@ -6,7 +6,6 @@ import hmac
 import json
 import logging
 import os
-import secrets
 import time
 from typing import Any, Optional, Tuple
 
@@ -18,7 +17,7 @@ from app.db.models import ChargePoint, ChargeSession, ChargingIntent
 from app.db.session import AsyncSessionLocal
 from app.ocpp.registry import remote_start_transaction
 from app.ocpp.time_utils import utcnow
-from app.services.email import send_stop_code_email
+from app.services.email import send_charging_started_email
 
 logger = logging.getLogger("payments.stripe")
 
@@ -68,7 +67,7 @@ def _verify_stripe_signature(payload: bytes, sig_header: str, secret: str, toler
         raise HTTPException(status_code=400, detail="missing_stripe_signature_header")
 
     ts, v1_list = _parse_stripe_sig_header(sig_header)
-    logger.info(f"STRIPE_SIG_DEBUG: ts={ts} v1_count={len(v1_list)} payload_len={len(payload)} sig_header_prefix={sig_header[:60]!r}")
+    logger.debug(f"STRIPE_SIG_DEBUG: ts={ts} v1_count={len(v1_list)} payload_len={len(payload)} sig_header_prefix={sig_header[:60]!r}")
     if ts is None or not v1_list:
         logger.error("STRIPE_SIG_FAIL: invalid header (no ts or v1)")
         raise HTTPException(status_code=400, detail="invalid_stripe_signature_header")
@@ -81,19 +80,10 @@ def _verify_stripe_signature(payload: bytes, sig_header: str, secret: str, toler
 
     expected = _compute_v1(secret, ts, payload)
     match = any(hmac.compare_digest(expected, v1) for v1 in v1_list)
-    logger.info(f"STRIPE_SIG_DEBUG: expected_prefix={expected[:16]!r} match={match} secret_prefix={secret[:12]!r}")
+    logger.debug(f"STRIPE_SIG_DEBUG: expected_prefix={expected[:16]!r} match={match} secret_prefix={secret[:12]!r}")
     if not match:
         logger.error("STRIPE_SIG_FAIL: HMAC mismatch")
         raise HTTPException(status_code=400, detail="invalid_stripe_signature")
-
-
-def _generate_stop_code() -> str:
-    # 8 karakter, könnyen diktálható
-    return secrets.token_hex(4).upper()
-
-
-def _hash_code(code: str) -> str:
-    return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 
 async def _load_intent(db: AsyncSession, intent_id: int) -> Optional[ChargingIntent]:
@@ -150,10 +140,7 @@ async def _ensure_session_and_remote_start(db: AsyncSession, intent: ChargingInt
         # Intent visszafizetendő – de ez Stripe-on kezelt (hold, nem charge)
         return {"session_id": active_session.id, "created": False, "conflict": True}
 
-    # 2) új session + stop code
-    stop_code = _generate_stop_code()
-    stop_hash = _hash_code(stop_code)
-
+    # 2) új session
     cs = ChargeSession(
         charge_point_id=intent.charge_point_id,
         connector_id=intent.connector_id,
@@ -167,7 +154,7 @@ async def _ensure_session_and_remote_start(db: AsyncSession, intent: ChargingInt
         cost_huf=None,
         anonymous_email=intent.anonymous_email,
         intent_id=intent.id,
-        stop_code_hash=stop_hash,
+        stop_code_hash=None,
     )
     db.add(cs)
     await db.flush()  # kap id-t
@@ -176,6 +163,9 @@ async def _ensure_session_and_remote_start(db: AsyncSession, intent: ChargingInt
     # A Voltie/OCPP töltők azonnal válaszolnak StartTransaction-nel a RemoteStart után.
     # Ha a session még nincs commitolva, a StartTransaction handler (új DB connection)
     # nem látja és ÚJ session-t hoz létre → dupla session bug.
+    # Az intent módosításait (status, payment_provider_ref, updated_at) szintén commitolja.
+    # A hívó (stripe_webhook) is hív db.commit()-ot, de az itt commitolt tranzakció után
+    # az no-op lesz. Az idempotens/conflict ágakon viszont a hívó commitja az intent változásait.
     await db.commit()
 
     # 3) OCPP remote start
@@ -183,10 +173,8 @@ async def _ensure_session_and_remote_start(db: AsyncSession, intent: ChargingInt
     if not cp:
         logger.error(f"ChargePoint not found for intent_id={intent.id} cp_id={intent.charge_point_id}")
         logger.warning("RemoteStart skipped: missing ChargePoint")
-        # Email küldés CP nélkül is – stop kód fontos
-        await send_stop_code_email(
+        await send_charging_started_email(
             to=intent.anonymous_email,
-            stop_code=stop_code,
             session_id=cs.id,
             cp_ocpp_id="—",
         )
@@ -203,10 +191,8 @@ async def _ensure_session_and_remote_start(db: AsyncSession, intent: ChargingInt
         logger.exception(f"RemoteStart failed: intent_id={intent.id} session_id={cs.id} err={e}")
         ocpp_res = {"status": "Error", "reason": str(e)}
 
-    # Stop kód email – még a plaintext kód birtokában vagyunk
-    await send_stop_code_email(
+    await send_charging_started_email(
         to=intent.anonymous_email,
-        stop_code=stop_code,
         session_id=cs.id,
         cp_ocpp_id=cp.ocpp_id,
     )
@@ -259,8 +245,11 @@ async def stripe_webhook(
     payment_status = data_obj.get("payment_status")
     metadata = data_obj.get("metadata") or {}
 
-    # Stripe oldalról completed, de safety: csak explicitly paid esetén induljon
-    if payment_status != "paid":
+    # "paid"    = azonnali capture (régi flow)
+    # "unpaid"  = manual capture / authorization hold (új flow) – a PaymentIntent requires_capture státuszban van
+    # Mindkét esetben indítjuk a töltést; ha nincs payment_intent sem, akkor kihagyjuk.
+    stripe_pi_id_check = data_obj.get("payment_intent")
+    if payment_status not in ("paid", "unpaid") or (payment_status == "unpaid" and not stripe_pi_id_check):
         logger.warning(f"checkout.session.completed but payment_status={payment_status!r} event_id={event_id}")
         return {"ok": True}
 
@@ -281,6 +270,12 @@ async def stripe_webhook(
         if not intent:
             logger.warning(f"Intent not found: intent_id={intent_id} event_id={event_id}")
             return {"ok": True}
+
+        # Stripe PaymentIntent ID mentése (manual capture-höz kell)
+        stripe_pi_id = data_obj.get("payment_intent")
+        if stripe_pi_id:
+            intent.stripe_payment_intent_id = str(stripe_pi_id)
+        intent.updated_at = utcnow()
 
         # Expired intentet nem indítunk
         now = utcnow()

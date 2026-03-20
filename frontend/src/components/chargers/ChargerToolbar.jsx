@@ -1,5 +1,16 @@
 import { useMemo } from "react";
 
+const STATUS_LABELS = {
+  all: "Minden státusz",
+  available: "Szabad",
+  charging: "Tölt",
+  preparing: "Csatlakoztatva",
+  finishing: "Csatlakoztatva",
+  unavailable: "Nem elérhető",
+  faulted: "Hibás",
+  offline: "Offline",
+};
+
 export default function ChargerToolbar({
   items,
   query,
@@ -15,36 +26,35 @@ export default function ChargerToolbar({
     return ["all", ...Array.from(set)];
   }, [items]);
 
+  const hasFilter = query || statusFilter !== "all";
+
   return (
-    <div className="toolbar">
-      <div className="toolbarRow">
+    <div className="space-y-3">
+      <div className="flex gap-2">
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Keresés: ID / hely / cím…"
-          className="field"
+          placeholder="Keresés helyszín, cím alapján…"
+          className="field flex-1"
         />
-
-        <button type="button" onClick={onReset} className="btn btnGhost">
-          Reset
-        </button>
+        {hasFilter && (
+          <button type="button" onClick={onReset} className="btn btnGhost shrink-0">
+            Törlés
+          </button>
+        )}
       </div>
 
-      <div className="toolbarLabelRow">
-        <label className="toolbarLabel">Státusz</label>
-
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="field sm:max-w-xs"
-        >
-          {statuses.map((s) => (
-            <option key={s} value={s}>
-              {s === "all" ? "Minden státusz" : s}
-            </option>
-          ))}
-        </select>
-      </div>
+      <select
+        value={statusFilter}
+        onChange={(e) => setStatusFilter(e.target.value)}
+        className="field"
+      >
+        {statuses.map((s) => (
+          <option key={s} value={s}>
+            {STATUS_LABELS[s] || s}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }

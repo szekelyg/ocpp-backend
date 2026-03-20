@@ -98,6 +98,21 @@ class ChargingIntent(Base):
     payment_provider = Column(String(32), nullable=True)        # pl. "stripe"
     payment_provider_ref = Column(String(255), nullable=True, index=True)  # pl. checkout_session_id vagy payment_intent_id
 
+    # Számlázási adatok – felhasználó által megadva az intent létrehozásakor
+    billing_type = Column(String(16), nullable=True)          # "personal" | "business"
+    billing_company = Column(String(255), nullable=True)      # cégnév (csak business)
+    billing_tax_number = Column(String(64), nullable=True)    # adószám (csak business)
+
+    # Számlázási adatok – felhasználó adja meg a saját felületünkön
+    billing_name = Column(String(255), nullable=True)
+    billing_street = Column(String(255), nullable=True)
+    billing_zip = Column(String(16), nullable=True)
+    billing_city = Column(String(128), nullable=True)
+    billing_country = Column(String(4), nullable=True)
+
+    # Stripe PaymentIntent ID – manual capture flow-hoz
+    stripe_payment_intent_id = Column(String(255), nullable=True, index=True)
+
     # opcionális: miért lett cancelled/failed (debug/support)
     cancel_reason = Column(String(64), nullable=True)
     last_error = Column(String(255), nullable=True)
@@ -137,6 +152,7 @@ class ChargeSession(Base):
     # unique=True: egy intenthez csak egy session jöhet létre (race condition védelem)
     intent_id = Column(Integer, ForeignKey("charging_intents.id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
     stop_code_hash = Column(String(255), nullable=True)
+    invoice_number = Column(String(64), nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)

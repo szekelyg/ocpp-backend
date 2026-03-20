@@ -7,3 +7,4 @@ pydantic
 pydantic-settings
 stripe>=7.0
 httpx>=0.27
+szamlazz.py>=1.5

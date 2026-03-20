@@ -93,6 +93,13 @@ async def remote_start_transaction(cp_id: str, connector_id: int = 1, id_tag: st
     return await send_call_and_wait(cp_id, "RemoteStartTransaction", payload, timeout_s=12.0)
 
 
+async def change_configuration(cp_id: str, key: str, value: str) -> dict:
+    """
+    ChangeConfiguration (OCPP 1.6): { key, value }
+    """
+    return await send_call_and_wait(cp_id, "ChangeConfiguration", {"key": key, "value": value}, timeout_s=10.0)
+
+
 async def remote_stop_transaction(cp_id: str, transaction_id: Any) -> dict:
     """
     RemoteStopTransaction (OCPP 1.6): { transactionId }

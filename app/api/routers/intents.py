@@ -40,6 +40,17 @@ class CreateIntentIn(BaseModel):
     email: EmailStr
     hold_amount_huf: int = Field(5000, ge=1000, le=25000)
 
+    # Számlázás – mindig kötelező
+    billing_type: str = Field("personal", pattern=r"^(personal|business)$")
+    billing_name: str = Field(..., min_length=2, max_length=255)
+    billing_street: str = Field(..., min_length=2, max_length=255)
+    billing_zip: str = Field(..., min_length=2, max_length=16)
+    billing_city: str = Field(..., min_length=1, max_length=128)
+    billing_country: str = Field("HU", min_length=2, max_length=4)
+    # Csak céges számlánál
+    billing_company: str | None = Field(None, max_length=255)
+    billing_tax_number: str | None = Field(None, max_length=64)
+
 
 @router.post("/", response_model=dict)
 async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)):
@@ -66,7 +77,7 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
             },
         )
 
-    # 2) Intent létrehozás DB-ben (CSAK létező oszlopokkal)
+    # 2) Intent létrehozás DB-ben
     intent = ChargingIntent(
         charge_point_id=cp.id,
         connector_id=int(body.connector_id),
@@ -74,6 +85,14 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
         status="pending_payment",
         hold_amount_huf=int(body.hold_amount_huf),
         expires_at=_utcnow() + timedelta(minutes=15),
+        billing_type=body.billing_type,
+        billing_name=body.billing_name,
+        billing_street=body.billing_street,
+        billing_zip=body.billing_zip,
+        billing_city=body.billing_city,
+        billing_country=body.billing_country,
+        billing_company=body.billing_company if body.billing_type == "business" else None,
+        billing_tax_number=body.billing_tax_number if body.billing_type == "business" else None,
     )
     db.add(intent)
     await db.commit()
@@ -91,6 +110,12 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
             "connector_id": str(body.connector_id),
         }
 
+        product_name = (
+            "EV töltési előleg – céges számla"
+            if body.billing_type == "business"
+            else "EV töltési előleg"
+        )
+
         params = {
             "mode": "payment",
             "success_url": f"{base_url}/pay/success?intent_id={intent.id}",
@@ -102,13 +127,16 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
                 {
                     "price_data": {
                         "currency": "huf",
-                        "product_data": {"name": "EV charging hold (deposit)"},
+                        "product_data": {"name": product_name},
                         "unit_amount": int(body.hold_amount_huf) * 100,
                     },
                     "quantity": 1,
                 }
             ],
-            "payment_intent_data": {"metadata": meta},
+            "payment_intent_data": {
+                "metadata": meta,
+                "capture_method": "manual",  # csak zárolás, tényleges terhelés a töltés végén
+            },
         }
 
         # Stripe-python v14.x: create(**params). Idempotency request option keywordként.

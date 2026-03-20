@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import and_, select
 
@@ -117,6 +117,15 @@ async def save_meter_values(cp_id: str, payload: dict) -> None:
             last_pw = 0.0
             last_ia = 0.0
 
+            # Előre betöltjük a session objektumot, hogy ne kelljen N+1 lekérés a ciklusban
+            cs: Optional[ChargeSession] = None
+            if active_session_id is not None:
+                cs = (
+                    await session.execute(select(ChargeSession).where(ChargeSession.id == int(active_session_id)))
+                ).scalar_one_or_none()
+
+            last_valid_energy_total: Optional[float] = None
+
             for mv in meter_values:
                 if not isinstance(mv, dict):
                     continue
@@ -132,6 +141,8 @@ async def save_meter_values(cp_id: str, payload: dict) -> None:
                 last_ia = ia
 
                 energy_total = _pick_measurand_sum(sampled, "Energy.Active.Import.Register")
+                if energy_total is not None:
+                    last_valid_energy_total = energy_total
 
                 session.add(
                     MeterSample(
@@ -146,14 +157,22 @@ async def save_meter_values(cp_id: str, payload: dict) -> None:
                     )
                 )
 
-                # live: ha van session és jön energia total, frissítjük meter_stop_wh + kWh/cost
-                if active_session_id is not None and energy_total is not None:
-                    cs = (
-                        await session.execute(select(ChargeSession).where(ChargeSession.id == int(active_session_id)))
-                    ).scalar_one_or_none()
-                    if cs and cs.finished_at is None:
-                        cs.meter_stop_wh = float(energy_total)
-                        _recalc_energy_and_cost(cs)
+            # live: a ciklus után egyszer frissítjük a session-t a legutóbbi energia értékkel
+            if cs is not None and cs.finished_at is None and last_valid_energy_total is not None:
+                energy_total_f = float(last_valid_energy_total)
+
+                # Ha meter_start_wh=0 (töltő session-relative számlálót küld, meterStart=0-val indult)
+                # és az energia érték > 1000 Wh → ez egy lifetime/abszolút számláló, nem session-relative.
+                # Ilyenkor NEM frissítjük a session energiát – a StopTransaction.meterStop adja a végeredményt
+                # (amely session-relative, tehát meter_start_wh=0 mellett helyesen számolható).
+                if cs.meter_start_wh is not None and float(cs.meter_start_wh) == 0.0 and energy_total_f > 1000:
+                    logger.info(
+                        f"MeterValues: lifetime counter ({energy_total_f:.0f} Wh) meter_start_wh=0 → "
+                        f"élő energia frissítés kihagyva (StopTransaction adja a végeredményt) session_id={cs.id}"
+                    )
+                elif cs.meter_start_wh is not None:
+                    cs.meter_stop_wh = energy_total_f
+                    _recalc_energy_and_cost(cs)
 
             cp.last_seen_at = now_dt
             if last_pw > 10 or last_ia > 0.1:
