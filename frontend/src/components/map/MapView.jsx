@@ -143,6 +143,11 @@ export default function MapView({ points = [], onSelect, onStartFlow }) {
                 <StatusBadge status={cp.status} />
                 <div>{lines[0]}</div>
                 {lines[1] ? <div className="text-slate-500">{lines[1]}</div> : null}
+                {cp.price_huf_per_kwh > 0 && (
+                  <div className="font-semibold text-emerald-600">
+                    {cp.price_huf_per_kwh.toLocaleString("hu-HU")} Ft/kWh
+                  </div>
+                )}
                 {STARTABLE.has(String(cp.status || "").toLowerCase()) && (
                   <button
                     onClick={() => { onSelect(cp.id); onStartFlow?.(cp.id); }}

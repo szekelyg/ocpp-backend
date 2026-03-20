@@ -26,7 +26,13 @@ export default function ChargerListItem({ cp, selected, onClick }) {
         <div className="mt-1 text-xs text-slate-400 leading-snug">{lines[1]}</div>
       )}
 
-      <div className="mt-2 flex items-center justify-between gap-2">
+      {cp.price_huf_per_kwh > 0 && (
+        <div className="mt-2 text-xs text-emerald-400 font-semibold">
+          {cp.price_huf_per_kwh.toLocaleString("hu-HU")} Ft/kWh
+        </div>
+      )}
+
+      <div className="mt-1.5 flex items-center justify-between gap-2">
         <span className="text-xs text-slate-500">Aktív: {timeAgo(cp.last_seen_at)}</span>
         {cp.latitude && cp.longitude && (
           <a
