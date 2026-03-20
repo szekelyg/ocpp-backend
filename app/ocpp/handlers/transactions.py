@@ -22,7 +22,7 @@ from app.services.invoice import create_session_invoice
 logger = logging.getLogger("ocpp")
 
 # HUF Stripe minimum – ennél kisebb összeget nem lehet capture-ölni
-_STRIPE_MIN_HUF = 175
+_STRIPE_MIN_HUF = 1000
 
 
 def _recalc_energy_and_cost(cs: ChargeSession) -> None:

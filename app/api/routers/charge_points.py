@@ -12,7 +12,7 @@ from app.db.models import ChargePoint
 router = APIRouter(prefix="/charge-points", tags=["charge-points"])
 
 OFFLINE_TTL = timedelta(seconds=120)
-_STRIPE_MIN_HUF = 175
+_STRIPE_MIN_HUF = 1000
 
 
 def _price_per_kwh() -> float:

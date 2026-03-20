@@ -47,6 +47,7 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
   const [showPay, setShowPay] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [minAck, setMinAck] = useState(false);
 
   const lines = useMemo(() => (cp ? placeLines(cp) : ["", ""]), [cp]);
   const canStart = cp && isStartable(cp.status) && !busy;
@@ -70,6 +71,7 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
 
   function openModal() {
     setErr("");
+    setMinAck(false);
     setShowPay(true);
     onModalChange?.(true);
   }
@@ -253,6 +255,29 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
           </div>
         </div>
 
+        {/* ── MINIMUM DÍJ ELFOGADÁSA ── */}
+        {cp.min_charge_huf > 0 && (
+          <label className="mt-4 flex items-start gap-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={minAck}
+              onChange={(e) => setMinAck(e.target.checked)}
+              disabled={busy}
+              className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-800 accent-blue-500 cursor-pointer shrink-0"
+            />
+            <span className="text-xs text-slate-300 leading-relaxed">
+              Tudomásul veszem, hogy a bankkártyás feldolgozás minimuma{" "}
+              <span className="font-semibold text-white">
+                {cp.min_charge_huf.toLocaleString("hu-HU")} Ft
+              </span>
+              {cp.price_huf_per_kwh > 0 && (
+                <> (≈ {(cp.min_charge_huf / cp.price_huf_per_kwh).toFixed(2).replace(".", ",")} kWh)</>
+              )}
+              . Nagyon rövid töltés esetén is legalább ez az összeg kerül levonásra.
+            </span>
+          </label>
+        )}
+
         {/* ── SZÁMLÁZÁSI ADATOK ── */}
         <div className="mt-5">
           <div className="text-xs font-semibold text-slate-300 uppercase tracking-wide mb-3">
@@ -424,7 +449,7 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
           <button
             type="button"
             className="btn btnPrimary"
-            disabled={busy || !isStartable(cp.status)}
+            disabled={busy || !isStartable(cp.status) || (cp.min_charge_huf > 0 && !minAck)}
             onClick={startFlow}
           >
             {busy ? "Átirányítás…" : `Zárolás: ${holdAmount.toLocaleString("hu-HU")} Ft →`}
