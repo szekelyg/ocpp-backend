@@ -589,13 +589,15 @@ function SessionDetail({ s, apiFetch, toast, onRefresh }) {
 
 // ── Sessions tab ──────────────────────────────────────────────────────────────
 
-function SessionsTab({ sessions, apiFetch, toast, onRefresh, highlightMissing }) {
+function SessionsTab({ sessions, chargers, apiFetch, toast, onRefresh, highlightMissing }) {
   const [showAll, setShowAll] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [onlyMissing, setOnlyMissing] = useState(highlightMissing);
+  const [cpFilter, setCpFilter] = useState("");
 
-  const active = sessions.filter(s => s.is_active);
-  let finished = sessions.filter(s => !s.is_active);
+  const filtered = cpFilter ? sessions.filter(s => s.charge_point_ocpp_id === cpFilter) : sessions;
+  const active = filtered.filter(s => s.is_active);
+  let finished = filtered.filter(s => !s.is_active);
   if (onlyMissing) {
     finished = finished.filter(s => s.anonymous_email && s.intent && !s.invoice_number);
   }
@@ -654,8 +656,25 @@ function SessionsTab({ sessions, apiFetch, toast, onRefresh, highlightMissing })
     );
   }
 
+  const cpOptions = [...new Set(sessions.map(s => s.charge_point_ocpp_id).filter(Boolean))].sort();
+
   return (
     <div className="space-y-8">
+      {/* Töltő szűrő */}
+      <div className="flex items-center gap-3">
+        <label className="text-xs text-slate-400 shrink-0">Töltő:</label>
+        <select
+          value={cpFilter} onChange={e => { setCpFilter(e.target.value); setShowAll(false); setExpandedId(null); }}
+          className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-200 outline-none focus:ring-2 focus:ring-blue-500/40"
+        >
+          <option value="">Összes töltő</option>
+          {cpOptions.map(id => <option key={id} value={id}>{id}</option>)}
+        </select>
+        {cpFilter && (
+          <button onClick={() => setCpFilter("")} className="text-xs text-slate-500 hover:text-slate-300">× törlés</button>
+        )}
+      </div>
+
       <div>
         <SectionHead>Aktív sessionök ({active.length})</SectionHead>
         {active.length === 0 ? (
@@ -708,6 +727,7 @@ function SessionsTab({ sessions, apiFetch, toast, onRefresh, highlightMissing })
 function IntentsTab({ intents, apiFetch, toast, onRefresh }) {
   const [expandedId, setExpandedId] = useState(null);
   const [refundBusy, setRefundBusy] = useState(null);
+  const [cpFilter, setCpFilter] = useState("");
 
   async function doRefund(intent) {
     setRefundBusy(intent.id);
@@ -722,9 +742,27 @@ function IntentsTab({ intents, apiFetch, toast, onRefresh }) {
     }
   }
 
+  const cpOptions = [...new Set(intents.map(i => i.charge_point_ocpp_id).filter(Boolean))].sort();
+  const displayed = cpFilter ? intents.filter(i => i.charge_point_ocpp_id === cpFilter) : intents;
+
   return (
     <div>
-      <SectionHead>Charging intentek ({intents.length})</SectionHead>
+      <div className="flex items-center gap-3 mb-4">
+        <SectionHead>Charging intentek ({displayed.length})</SectionHead>
+        <div className="flex items-center gap-2 -mt-3">
+          <label className="text-xs text-slate-400 shrink-0">Töltő:</label>
+          <select
+            value={cpFilter} onChange={e => { setCpFilter(e.target.value); setExpandedId(null); }}
+            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-200 outline-none focus:ring-2 focus:ring-blue-500/40"
+          >
+            <option value="">Összes töltő</option>
+            {cpOptions.map(id => <option key={id} value={id}>{id}</option>)}
+          </select>
+          {cpFilter && (
+            <button onClick={() => setCpFilter("")} className="text-xs text-slate-500 hover:text-slate-300">× törlés</button>
+          )}
+        </div>
+      </div>
       <div className="overflow-x-auto rounded-xl border border-slate-800">
         <table className="w-full">
           <thead className="bg-slate-800/60">
@@ -734,7 +772,7 @@ function IntentsTab({ intents, apiFetch, toast, onRefresh }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
-            {intents.map(i => {
+            {displayed.map(i => {
               const expanded = expandedId === i.id;
               const canRefund = i.stripe_payment_intent_id && ["paid", "pending_payment"].includes(i.status);
               return (
@@ -1136,7 +1174,7 @@ export default function AdminPage() {
         {tab === "chargers" && <ChargersTab chargers={chargers} apiFetch={apiFetch} toast={toast} />}
         {tab === "sessions" && (
           <SessionsTab
-            sessions={sessions} apiFetch={apiFetch} toast={toast} onRefresh={refresh}
+            sessions={sessions} chargers={chargers} apiFetch={apiFetch} toast={toast} onRefresh={refresh}
             highlightMissing={missingInvoices > 0}
           />
         )}
