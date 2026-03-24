@@ -15,6 +15,7 @@ from app.api.routers.charge_points import router as charge_points_router
 from app.api.routers.sessions import router as sessions_router
 from app.api.routers.payments_stripe import router as payments_stripe_router
 from app.api.routers.intents import router as intents_router
+from app.api.routers.admin import router as admin_router
 from app.ocpp.ocpp_ws import handle_ocpp
 
 logger = logging.getLogger("backend")
@@ -255,6 +256,7 @@ app.include_router(charge_points_router, prefix="/api")
 app.include_router(sessions_router, prefix="/api")
 app.include_router(payments_stripe_router, prefix="/api")
 app.include_router(intents_router, prefix="/api")
+app.include_router(admin_router, prefix="/api")
 
 
 # Ideiglenes admin endpoint – GetConfiguration lekérdezés

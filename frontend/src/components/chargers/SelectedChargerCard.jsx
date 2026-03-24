@@ -30,7 +30,7 @@ function Field({ label, children }) {
 
 const inputCls = "w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-slate-100 outline-none focus:ring-2 focus:ring-blue-500/40 text-sm disabled:opacity-50";
 
-export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, onAutoOpenDone }) {
+export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, onAutoOpenDone, compact = false }) {
   const [email, setEmail] = useState("");
   const [holdAmount, setHoldAmount] = useState(5000);
 
@@ -146,21 +146,23 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
 
   return (
     <div className="space-y-4">
-      {/* Helyszín & státusz */}
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="font-semibold text-slate-100 leading-tight">
-            {lines[0] || cp.ocpp_id || "—"}
+      {/* Helyszín & státusz – compact módban elrejtve */}
+      {!compact && (
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="font-semibold text-slate-100 leading-tight">
+              {lines[0] || cp.ocpp_id || "—"}
+            </div>
+            {lines[1] && (
+              <div className="text-sm text-slate-400 mt-0.5">{lines[1]}</div>
+            )}
+            <div className="text-xs text-slate-500 mt-1">
+              Aktív: {timeAgo(cp.last_seen_at)}
+            </div>
           </div>
-          {lines[1] && (
-            <div className="text-sm text-slate-400 mt-0.5">{lines[1]}</div>
-          )}
-          <div className="text-xs text-slate-500 mt-1">
-            Aktív: {timeAgo(cp.last_seen_at)}
-          </div>
+          <StatusBadge status={cp.status} />
         </div>
-        <StatusBadge status={cp.status} />
-      </div>
+      )}
 
       {/* Csatlakozó infó */}
       {(cp.connector_type || cp.max_power_kw) && (

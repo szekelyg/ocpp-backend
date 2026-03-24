@@ -13,7 +13,8 @@ export default function Home() {
   const cpParam = searchParams.get("cp");
 
   const [items, setItems] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
+  const [selectedId, setSelectedId] = useState(null); // térkép highlight
+  const [expandedId, setExpandedId] = useState(null); // lista expand (toggle)
   const [lastUpdated, setLastUpdated] = useState(null);
   const [autoOpenModal, setAutoOpenModal] = useState(false);
   const autoOpenDoneRef = useRef(false);
@@ -82,22 +83,18 @@ export default function Home() {
   }, [items, query, statusFilter]);
 
   const selected = useMemo(() => {
-    return filtered.find((x) => x.id === selectedId) || filtered[0] || null;
-  }, [filtered, selectedId]);
+    return filtered.find((x) => x.id === expandedId) || null;
+  }, [filtered, expandedId]);
 
+  // Ha a kiválasztott töltő kiszűrődik, töröljük az expandot
   useEffect(() => {
-    if (!filtered.length) {
-      if (selectedId != null) setSelectedId(null);
-      return;
+    if (expandedId != null && !filtered.some((x) => x.id === expandedId)) {
+      setExpandedId(null);
     }
-    if (selectedId == null) {
-      setSelectedId(filtered[0].id);
-      return;
+    if (selectedId != null && !filtered.some((x) => x.id === selectedId)) {
+      setSelectedId(null);
     }
-    if (!filtered.some((x) => x.id === selectedId)) {
-      setSelectedId(filtered[0].id);
-    }
-  }, [filtered, selectedId]);
+  }, [filtered, expandedId, selectedId]);
 
   // ?cp=<id> – töltő előválasztás és modal auto-nyitás (csak startolható státusznál)
   useEffect(() => {
@@ -107,11 +104,22 @@ export default function Home() {
     if (!match) return;
     autoOpenDoneRef.current = true;
     setSelectedId(match.id);
+    setExpandedId(match.id);
     const startable = new Set(["available", "preparing", "finishing"]);
     if (startable.has(String(match.status || "").toLowerCase())) {
       setAutoOpenModal(true);
     }
   }, [cpParam, items]);
+
+  const handleToggle = useCallback((id) => {
+    setSelectedId(id);
+    setExpandedId((prev) => (prev === id ? null : id));
+  }, []);
+
+  const handleMapSelect = useCallback((id) => {
+    setSelectedId(id);
+    setExpandedId(id);
+  }, []);
 
   const resetFilters = useCallback(() => {
     setQuery("");
@@ -155,8 +163,9 @@ export default function Home() {
             <div className="w-full flex-1 min-h-[50vh]">
               <MapView
                 points={filtered}
-                onSelect={setSelectedId}
-                onStartFlow={(id) => { setSelectedId(id); setAutoOpenModal(true); }}
+                selectedId={selectedId}
+                onSelect={handleMapSelect}
+                onStartFlow={(id) => { handleMapSelect(id); setAutoOpenModal(true); }}
               />
             </div>
           </div>
@@ -182,8 +191,8 @@ export default function Home() {
 
                 <ChargerList
                   items={filtered}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
+                  selectedId={expandedId}
+                  onToggle={handleToggle}
                   selectedCp={selected}
                   autoOpenModal={autoOpenModal}
                   onAutoOpenDone={() => setAutoOpenModal(false)}

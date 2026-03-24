@@ -14,7 +14,7 @@ function statusPriority(status) {
   return s in STATUS_PRIORITY ? STATUS_PRIORITY[s] : 3; // offline/hiba/ismeretlen → legvégére
 }
 
-export default function ChargerList({ items, selectedId, onSelect, selectedCp, autoOpenModal, onAutoOpenDone, onModalChange }) {
+export default function ChargerList({ items, selectedId, onSelect, onToggle, selectedCp, autoOpenModal, onAutoOpenDone, onModalChange }) {
   const list = useMemo(
     () => [...(items || [])].sort((a, b) => statusPriority(a.status) - statusPriority(b.status)),
     [items]
@@ -35,7 +35,7 @@ export default function ChargerList({ items, selectedId, onSelect, selectedCp, a
           <ChargerListItem
             cp={cp}
             selected={cp.id === selectedId}
-            onClick={() => onSelect(cp.id)}
+            onClick={() => onToggle(cp.id)}
           />
           {cp.id === selectedId && selectedCp && (
             <div className="rounded-xl border border-blue-500/20 bg-slate-800/50 px-4 pt-4 pb-3">
@@ -44,6 +44,7 @@ export default function ChargerList({ items, selectedId, onSelect, selectedCp, a
                 autoOpenModal={autoOpenModal}
                 onAutoOpenDone={onAutoOpenDone}
                 onModalChange={onModalChange}
+                compact
               />
             </div>
           )}
