@@ -52,6 +52,8 @@ def _cp_dict(cp: ChargePoint) -> dict:
         "address_text": cp.location.address_text if cp.location else None,
         "latitude": float(cp.location.latitude) if cp.location and cp.location.latitude else None,
         "longitude": float(cp.location.longitude) if cp.location and cp.location.longitude else None,
+        "connector_type": cp.connector_type,
+        "max_power_kw": cp.max_power_kw,
         "price_huf_per_kwh": price,
         "min_charge_huf": _STRIPE_MIN_HUF,
     }

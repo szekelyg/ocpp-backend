@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_db
-from app.db.models import ChargePoint, ChargeSession
+from app.db.models import ChargePoint, ChargeSession, MeterSample
 from app.ocpp.ocpp_ws import remote_start_transaction, remote_stop_transaction
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -35,7 +35,18 @@ def _duration_s(s: ChargeSession) -> Optional[int]:
     return max(0, int((end - start).total_seconds()))
 
 
-def _session_to_dict(s: ChargeSession, cp: Optional[ChargePoint] = None) -> dict:
+async def _get_latest_power_w(db: AsyncSession, session_id: int) -> Optional[float]:
+    res = await db.execute(
+        select(MeterSample.power_w)
+        .where(MeterSample.session_id == session_id, MeterSample.power_w.isnot(None))
+        .order_by(desc(MeterSample.ts))
+        .limit(1)
+    )
+    row = res.scalar_one_or_none()
+    return row
+
+
+def _session_to_dict(s: ChargeSession, cp: Optional[ChargePoint] = None, power_w: Optional[float] = None) -> dict:
     result: dict = {
         "id": s.id,
         "charge_point_id": s.charge_point_id,
@@ -49,6 +60,7 @@ def _session_to_dict(s: ChargeSession, cp: Optional[ChargePoint] = None) -> dict
         "is_active": s.finished_at is None,
         "duration_s": _duration_s(s),
         "timed_out": s.finished_at is not None and s.ocpp_transaction_id is None,
+        "power_w": power_w,
     }
     if cp is not None:
         result["charge_point"] = {
@@ -258,7 +270,8 @@ async def get_session(
     s = res.scalar_one_or_none()
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
-    return _session_to_dict(s, s.charge_point)
+    power_w = await _get_latest_power_w(db, s.id) if s.finished_at is None else None
+    return _session_to_dict(s, s.charge_point, power_w=power_w)
 
 
 @router.post("/{session_id}/stop", response_model=dict)

@@ -19,6 +19,7 @@ from app.ocpp.ocpp_ws import handle_ocpp
 
 logger = logging.getLogger("backend")
 logging.basicConfig(level=logging.INFO)
+logging.getLogger("ocpp").setLevel(logging.DEBUG)
 
 # ---------------------------------------------------------------------------
 # Waiting session timeout background task
@@ -254,6 +255,37 @@ app.include_router(charge_points_router, prefix="/api")
 app.include_router(sessions_router, prefix="/api")
 app.include_router(payments_stripe_router, prefix="/api")
 app.include_router(intents_router, prefix="/api")
+
+
+# Ideiglenes admin endpoint – GetConfiguration lekérdezés
+@app.get("/api/admin/get-config/{cp_id}")
+async def admin_get_config(cp_id: str):
+    from app.ocpp.registry import send_call_and_wait
+    try:
+        res = await send_call_and_wait(cp_id, "GetConfiguration", {}, timeout_s=10)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.post("/api/admin/change-config/{cp_id}")
+async def admin_change_config(cp_id: str, key: str, value: str):
+    from app.ocpp.registry import send_call_and_wait
+    try:
+        res = await send_call_and_wait(cp_id, "ChangeConfiguration", {"key": key, "value": value}, timeout_s=10)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.post("/api/admin/reset/{cp_id}")
+async def admin_reset(cp_id: str, reset_type: str = "Soft"):
+    from app.ocpp.registry import send_call_and_wait
+    try:
+        res = await send_call_and_wait(cp_id, "Reset", {"type": reset_type}, timeout_s=15)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 # OCPP WebSocket endpoint – ID-val a path-ban

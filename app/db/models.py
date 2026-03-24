@@ -45,6 +45,9 @@ class ChargePoint(Base):
     vendor = Column(String, nullable=True)
     firmware_version = Column(String, nullable=True)
 
+    connector_type = Column(String(64), nullable=True)   # pl. "Type 2", "CCS2", "CHAdeMO"
+    max_power_kw = Column(Float, nullable=True)           # pl. 22.0, 50.0
+
     status = Column(String(32), nullable=False, default="available")
     last_seen_at = Column(DateTime(timezone=True), nullable=True)
 
