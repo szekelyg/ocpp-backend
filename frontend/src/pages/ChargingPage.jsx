@@ -244,6 +244,14 @@ export default function ChargingPage() {
               </div>
             </div>
             <div>
+              <div className="label mb-1">Töltési teljesítmény</div>
+              <div className="text-2xl font-mono font-semibold tabular-nums">
+                {session?.power_w != null
+                  ? `${(session.power_w / 1000).toFixed(1)} kW`
+                  : "—"}
+              </div>
+            </div>
+            <div>
               <div className="label mb-1">Indítás</div>
               <div className="text-sm text-slate-300 tabular-nums">
                 {session?.started_at

@@ -177,6 +177,20 @@ export default function MapView({ points = [], onSelect, onStartFlow }) {
                 <StatusBadge status={cp.status} />
                 <div>{lines[0]}</div>
                 {lines[1] ? <div className="text-slate-500">{lines[1]}</div> : null}
+                {(cp.connector_type || cp.max_power_kw) && (
+                  <div className="flex flex-wrap gap-1">
+                    {cp.connector_type && (
+                      <span className="text-xs bg-gray-100 border border-gray-300 rounded px-1.5 py-0.5 text-gray-600">
+                        {cp.connector_type}
+                      </span>
+                    )}
+                    {cp.max_power_kw && (
+                      <span className="text-xs bg-gray-100 border border-gray-300 rounded px-1.5 py-0.5 text-gray-600">
+                        {cp.max_power_kw} kW
+                      </span>
+                    )}
+                  </div>
+                )}
                 {cp.price_huf_per_kwh > 0 && (
                   <div className="font-semibold text-emerald-600">
                     {cp.price_huf_per_kwh.toLocaleString("hu-HU")} Ft/kWh

@@ -162,6 +162,24 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
         <StatusBadge status={cp.status} />
       </div>
 
+      {/* Csatlakozó infó */}
+      {(cp.connector_type || cp.max_power_kw) && (
+        <div className="flex flex-wrap gap-2">
+          {cp.connector_type && (
+            <span className="inline-flex items-center gap-1 rounded-lg bg-slate-800 border border-slate-700 px-2.5 py-1 text-xs text-slate-300">
+              <span className="text-slate-500">Csatlakozó</span>
+              <span className="font-medium text-slate-100">{cp.connector_type}</span>
+            </span>
+          )}
+          {cp.max_power_kw && (
+            <span className="inline-flex items-center gap-1 rounded-lg bg-slate-800 border border-slate-700 px-2.5 py-1 text-xs text-slate-300">
+              <span className="text-slate-500">Max. teljesítmény</span>
+              <span className="font-medium text-slate-100">{cp.max_power_kw} kW</span>
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Állapot tájékoztató */}
       {statusStr === "available" && (
         <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-3 text-xs text-slate-400">

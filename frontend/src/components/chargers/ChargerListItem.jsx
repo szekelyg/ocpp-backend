@@ -26,6 +26,21 @@ export default function ChargerListItem({ cp, selected, onClick }) {
         <div className="mt-1 text-xs text-slate-400 leading-snug">{lines[1]}</div>
       )}
 
+      {(cp.connector_type || cp.max_power_kw) && (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {cp.connector_type && (
+            <span className="text-xs bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-300">
+              {cp.connector_type}
+            </span>
+          )}
+          {cp.max_power_kw && (
+            <span className="text-xs bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-300">
+              {cp.max_power_kw} kW
+            </span>
+          )}
+        </div>
+      )}
+
       {cp.price_huf_per_kwh > 0 && (
         <div className="mt-2 text-xs text-emerald-400 font-semibold">
           {cp.price_huf_per_kwh.toLocaleString("hu-HU")} Ft/kWh

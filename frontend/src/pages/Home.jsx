@@ -4,7 +4,6 @@ import { useSearchParams } from "react-router-dom";
 import AppHeader from "../components/ui/AppHeader";
 import MapView from "../components/map/MapView";
 import ChargerList from "../components/chargers/ChargerList";
-import SelectedChargerCard from "../components/chargers/SelectedChargerCard";
 import ChargerToolbar from "../components/chargers/ChargerToolbar";
 
 const REFRESH_MS = 5000;
@@ -153,7 +152,7 @@ export default function Home() {
               )}
             </div>
 
-            <div className="w-full h-[60vh] md:h-[70vh] lg:h-[75vh] xl:h-[80vh] 2xl:h-[85vh]">
+            <div className="w-full flex-1 min-h-[50vh]">
               <MapView
                 points={filtered}
                 onSelect={setSelectedId}
@@ -185,22 +184,7 @@ export default function Home() {
                   items={filtered}
                   selectedId={selectedId}
                   onSelect={setSelectedId}
-                />
-              </div>
-            </div>
-
-            {/* KIVÁLASZTOTT */}
-            <div className="bg-slate-900 rounded-2xl shadow border border-slate-800">
-              <div className="px-5 py-4 border-b border-slate-800">
-                <div className="font-semibold text-slate-100">Töltés indítása</div>
-                <div className="text-xs text-slate-400 mt-0.5">
-                  Válasszon töltőt, majd fizessen kártyával
-                </div>
-              </div>
-
-              <div className="p-5">
-                <SelectedChargerCard
-                  cp={selected}
+                  selectedCp={selected}
                   autoOpenModal={autoOpenModal}
                   onAutoOpenDone={() => setAutoOpenModal(false)}
                   onModalChange={(open) => { modalOpenRef.current = open; }}
