@@ -26,22 +26,35 @@ def _as_int(v: Any) -> Optional[int]:
     return int(f) if f is not None else None
 
 
-def _pick_measurand_sum(sampled_values: Any, measurand: str) -> Optional[float]:
+def _pick_measurand_sum(
+    sampled_values: Any, measurand: str, default_measurand: bool = False
+) -> Optional[float]:
     """
     sampledValue listából kivesszük a measurand összegzett értékét.
     Először phase nélkülit keres, majd fázisonként összeadja.
+
+    default_measurand=True esetén a measurand nélküli értékek is illeszkednek:
+    OCPP 1.6-ban a measurand kulcs nélküli sampledValue alapból
+    "Energy.Active.Import.Register". Enélkül egyes töltők élő energia értékei
+    kimaradnának (UI 0 kWh / 0 Ft töltés közben).
     """
     if not isinstance(sampled_values, list):
         return None
 
+    def _matches(sv: dict) -> bool:
+        m = sv.get("measurand")
+        if m == measurand:
+            return True
+        return default_measurand and m is None
+
     for sv in sampled_values:
-        if isinstance(sv, dict) and sv.get("measurand") == measurand and not sv.get("phase"):
+        if isinstance(sv, dict) and _matches(sv) and not sv.get("phase"):
             return _as_float(sv.get("value"))
 
     total = 0.0
     found = False
     for sv in sampled_values:
-        if isinstance(sv, dict) and sv.get("measurand") == measurand:
+        if isinstance(sv, dict) and _matches(sv):
             val = _as_float(sv.get("value"))
             if val is not None:
                 total += val

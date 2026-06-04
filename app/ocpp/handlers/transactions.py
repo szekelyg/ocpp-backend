@@ -266,15 +266,10 @@ async def stop_transaction(cp_id: str, payload: dict) -> None:
                         billing_type=cs.intent.billing_type,
                     )
                     if invoice_number:
+                        # cs még ehhez a session-höz kötött; a fenti session.commit() (215. sor)
+                        # után újra dirty-vé tesszük és commitoljuk – nem kell külön DB session.
                         cs.invoice_number = invoice_number
-                        async with AsyncSessionLocal() as upd:
-                            await upd.execute(
-                                __import__("sqlalchemy").text(
-                                    "UPDATE charge_sessions SET invoice_number=:inv WHERE id=:sid"
-                                ),
-                                {"inv": invoice_number, "sid": cs.id},
-                            )
-                            await upd.commit()
+                        await session.commit()
 
     except Exception as e:
         logger.exception(f"Hiba StopTransaction mentésekor: {e}")

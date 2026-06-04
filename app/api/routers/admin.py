@@ -1,4 +1,5 @@
 # app/api/routers/admin.py
+import logging
 import os
 import secrets
 from datetime import datetime, timezone
@@ -15,6 +16,8 @@ from app.api.deps import get_db
 from app.db.models import ChargePoint, ChargeSession, ChargingIntent
 from app.api.routers.charge_points import compute_status
 
+logger = logging.getLogger("admin")
+
 router = APIRouter(prefix="/admin", tags=["admin"])
 _security = HTTPBasic()
 
@@ -22,14 +25,22 @@ _security = HTTPBasic()
 # ── Auth ─────────────────────────────────────────────────────────────────────
 
 def _admin_creds():
+    # Nincs beégetett jelszó default: ADMIN_PASSWORD kötelező env változó.
     return (
         os.environ.get("ADMIN_USERNAME", "admin"),
-        os.environ.get("ADMIN_PASSWORD", "Sevenof9"),
+        os.environ.get("ADMIN_PASSWORD"),
     )
 
 
 def verify_admin(credentials: HTTPBasicCredentials = Depends(_security)):
     exp_user, exp_pass = _admin_creds()
+    if not exp_pass:
+        # Fail-closed: ADMIN_PASSWORD nélkül nincs admin hozzáférés (nincs publikus default jelszó).
+        logger.error("ADMIN_PASSWORD nincs beállítva – admin hozzáférés letiltva (503)")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="admin_not_configured",
+        )
     ok = secrets.compare_digest(credentials.username.encode(), exp_user.encode()) and \
          secrets.compare_digest(credentials.password.encode(), exp_pass.encode())
     if not ok:
@@ -142,8 +153,8 @@ def _cp_dict_admin(cp: ChargePoint) -> dict:
         "last_seen_at": cp.last_seen_at.isoformat() if cp.last_seen_at else None,
         "location_name": cp.location.name if cp.location else None,
         "address_text": cp.location.address_text if cp.location else None,
-        "latitude": float(cp.location.latitude) if cp.location and cp.location.latitude else None,
-        "longitude": float(cp.location.longitude) if cp.location and cp.location.longitude else None,
+        "latitude": float(cp.location.latitude) if cp.location and cp.location.latitude is not None else None,
+        "longitude": float(cp.location.longitude) if cp.location and cp.location.longitude is not None else None,
         "created_at": cp.created_at.isoformat() if cp.created_at else None,
     }
 

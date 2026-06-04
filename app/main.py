@@ -259,35 +259,12 @@ app.include_router(intents_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 
 
-# Ideiglenes admin endpoint – GetConfiguration lekérdezés
-@app.get("/api/admin/get-config/{cp_id}")
-async def admin_get_config(cp_id: str):
-    from app.ocpp.registry import send_call_and_wait
-    try:
-        res = await send_call_and_wait(cp_id, "GetConfiguration", {}, timeout_s=10)
-        return res
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
-
-
-@app.post("/api/admin/change-config/{cp_id}")
-async def admin_change_config(cp_id: str, key: str, value: str):
-    from app.ocpp.registry import send_call_and_wait
-    try:
-        res = await send_call_and_wait(cp_id, "ChangeConfiguration", {"key": key, "value": value}, timeout_s=10)
-        return res
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
-
-
-@app.post("/api/admin/reset/{cp_id}")
-async def admin_reset(cp_id: str, reset_type: str = "Soft"):
-    from app.ocpp.registry import send_call_and_wait
-    try:
-        res = await send_call_and_wait(cp_id, "Reset", {"type": reset_type}, timeout_s=15)
-        return res
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
+# Megjegyzés: a GetConfiguration / ChangeConfiguration / Reset admin műveletek
+# a hitelesített admin routerben élnek (app/api/routers/admin.py):
+#   POST /api/admin/charge-points/{id}/reset
+#   GET  /api/admin/charge-points/{id}/config
+# A korábbi top-level /api/admin/{reset,get-config,change-config} végpontok
+# hitelesítés NÉLKÜL voltak elérhetők (bárki újraindíthatott egy töltőt) – eltávolítva.
 
 
 # OCPP WebSocket endpoint – ID-val a path-ban
