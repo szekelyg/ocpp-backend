@@ -8,11 +8,13 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_db
 from app.db.models import ChargePoint
+from app.ocpp.ocpp_utils import MIN_CHARGE_HUF
 
 router = APIRouter(prefix="/charge-points", tags=["charge-points"])
 
 OFFLINE_TTL = timedelta(seconds=120)
-_STRIPE_MIN_HUF = 1000
+# Üzleti minimum (HUF) – közös forrás: ocpp_utils.MIN_CHARGE_HUF
+_STRIPE_MIN_HUF = MIN_CHARGE_HUF
 
 
 def _price_per_kwh() -> float:
@@ -50,8 +52,8 @@ def _cp_dict(cp: ChargePoint) -> dict:
         "last_seen_at": cp.last_seen_at.isoformat() if cp.last_seen_at else None,
         "location_name": cp.location.name if cp.location else None,
         "address_text": cp.location.address_text if cp.location else None,
-        "latitude": float(cp.location.latitude) if cp.location and cp.location.latitude else None,
-        "longitude": float(cp.location.longitude) if cp.location and cp.location.longitude else None,
+        "latitude": float(cp.location.latitude) if cp.location and cp.location.latitude is not None else None,
+        "longitude": float(cp.location.longitude) if cp.location and cp.location.longitude is not None else None,
         "connector_type": cp.connector_type,
         "max_power_kw": cp.max_power_kw,
         "price_huf_per_kwh": price,

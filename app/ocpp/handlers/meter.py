@@ -140,7 +140,9 @@ async def save_meter_values(cp_id: str, payload: dict) -> None:
                 last_pw = pw
                 last_ia = ia
 
-                energy_total = _pick_measurand_sum(sampled, "Energy.Active.Import.Register")
+                energy_total = _pick_measurand_sum(
+                    sampled, "Energy.Active.Import.Register", default_measurand=True
+                )
                 if energy_total is not None:
                     last_valid_energy_total = energy_total
 

@@ -236,12 +236,19 @@ export default function ChargingPage() {
               </div>
             </div>
             <div>
-              <div className="label mb-1">Becsült díj</div>
+              <div className="label mb-1">{phase === "finished" ? "Végösszeg" : "Becsült díj"}</div>
               <div className="text-2xl font-mono font-semibold tabular-nums">
                 {session?.cost_huf != null
                   ? `${Math.round(session.cost_huf).toLocaleString("hu-HU")} Ft`
                   : "—"}
               </div>
+              {session?.price_huf_per_kwh > 0 && (
+                <div className="text-xs text-slate-500 mt-1 leading-snug">
+                  {session.price_huf_per_kwh.toLocaleString("hu-HU")} Ft/kWh
+                  {session?.min_charge_huf > 0 &&
+                    ` · min. ${session.min_charge_huf.toLocaleString("hu-HU")} Ft`}
+                </div>
+              )}
             </div>
             <div>
               <div className="label mb-1">Töltési teljesítmény</div>
@@ -261,6 +268,18 @@ export default function ChargingPage() {
             </div>
           </div>
         </div>
+
+        {/* Zárolt összeg – maximális terhelés */}
+        {session?.hold_amount_huf > 0 && (
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 px-4 py-3 text-xs text-slate-400 leading-relaxed">
+            Zárolt összeg:{" "}
+            <span className="text-slate-200 font-semibold">
+              {session.hold_amount_huf.toLocaleString("hu-HU")} Ft
+            </span>{" "}
+            — legfeljebb ennyi kerülhet levonásra. A töltés végén csak a ténylegesen
+            elfogyasztott energia díját számítjuk fel; a fennmaradó zárolás feloldódik.
+          </div>
+        )}
 
         {/* Stop gomb – inline megerősítéssel */}
         {canStop && !stopConfirm && (

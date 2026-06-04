@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import get_db
 from app.db.models import ChargePoint, ChargeSession, MeterSample
 from app.ocpp.ocpp_ws import remote_start_transaction, remote_stop_transaction
+from app.ocpp.ocpp_utils import MIN_CHARGE_HUF, _price_huf_per_kwh
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -46,7 +47,12 @@ async def _get_latest_power_w(db: AsyncSession, session_id: int) -> Optional[flo
     return row
 
 
-def _session_to_dict(s: ChargeSession, cp: Optional[ChargePoint] = None, power_w: Optional[float] = None) -> dict:
+def _session_to_dict(
+    s: ChargeSession,
+    cp: Optional[ChargePoint] = None,
+    power_w: Optional[float] = None,
+    hold_amount_huf: Optional[int] = None,
+) -> dict:
     result: dict = {
         "id": s.id,
         "charge_point_id": s.charge_point_id,
@@ -61,6 +67,10 @@ def _session_to_dict(s: ChargeSession, cp: Optional[ChargePoint] = None, power_w
         "duration_s": _duration_s(s),
         "timed_out": s.finished_at is not None and s.ocpp_transaction_id is None,
         "power_w": power_w,
+        # Ártájékoztatás a töltési felülethez
+        "price_huf_per_kwh": _price_huf_per_kwh(),
+        "min_charge_huf": MIN_CHARGE_HUF,
+        "hold_amount_huf": hold_amount_huf,
     }
     if cp is not None:
         result["charge_point"] = {
@@ -264,14 +274,18 @@ async def get_session(
 ):
     res = await db.execute(
         select(ChargeSession)
-        .options(selectinload(ChargeSession.charge_point))
+        .options(
+            selectinload(ChargeSession.charge_point),
+            selectinload(ChargeSession.intent),
+        )
         .where(ChargeSession.id == session_id)
     )
     s = res.scalar_one_or_none()
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
     power_w = await _get_latest_power_w(db, s.id) if s.finished_at is None else None
-    return _session_to_dict(s, s.charge_point, power_w=power_w)
+    hold = s.intent.hold_amount_huf if s.intent else None
+    return _session_to_dict(s, s.charge_point, power_w=power_w, hold_amount_huf=hold)
 
 
 @router.post("/{session_id}/stop", response_model=dict)

@@ -12,7 +12,6 @@ Konfig /etc/ocpp-backend.env-ben:
 from __future__ import annotations
 
 import logging
-import math
 import os
 from datetime import datetime, timezone
 from typing import Optional
@@ -26,13 +25,6 @@ _VAT_DIVISOR = 1 + _VAT_RATE / 100  # 1.27
 
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default).strip()
-
-
-def _gross_to_net_vat(gross: float) -> tuple[float, float]:
-    """Bruttó összegből nettó + ÁFA kiszámítása (27%)."""
-    net = round(gross / _VAT_DIVISOR, 2)
-    vat = round(gross - net, 2)
-    return net, vat
 
 
 async def create_session_invoice(
@@ -108,18 +100,21 @@ async def create_session_invoice(
             send_email=True,
         )
 
-        # Tétel: töltési szolgáltatás kWh-ban vagy egységáron
+        # Tétel: töltési szolgáltatás kWh-ban vagy egységáron.
+        # A captured_huf egész HUF összeg (= Stripe capture). A nettó/ÁFA/bruttó
+        # belsőleg konzisztens: vat = net * 27%, gross = net + vat. (A számlázz.hu
+        # az ÁFA-t a kulcs alapján validálja, ezért NEM a captured-ből vonjuk ki.)
+        gross_huf = float(round(captured_huf))
         if energy_kwh and energy_kwh > 0:
             quantity = round(energy_kwh, 3)
             unit = "kWh"
-            net_unit = round(captured_huf / _VAT_DIVISOR / quantity, 2)
         else:
             quantity = 1.0
             unit = "db"
-            net_unit = round(captured_huf / _VAT_DIVISOR, 2)
 
+        net_unit = round(gross_huf / _VAT_DIVISOR / quantity, 2)
         net_total = round(net_unit * quantity, 2)
-        vat_amount = round(captured_huf - net_total, 2)
+        vat_amount = round(net_total * _VAT_RATE / 100, 2)
         gross_total = round(net_total + vat_amount, 2)
 
         item = Item(

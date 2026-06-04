@@ -15,14 +15,14 @@ from app.db.models import ChargePoint, ChargeSession, ChargingIntent
 from datetime import timezone
 
 from app.ocpp.time_utils import parse_ocpp_timestamp, utcnow
-from app.ocpp.ocpp_utils import _as_float, _as_int, _price_huf_per_kwh
+from app.ocpp.ocpp_utils import MIN_CHARGE_HUF, _as_float, _as_int, _price_huf_per_kwh
 from app.services.email import send_receipt_email
 from app.services.invoice import create_session_invoice
 
 logger = logging.getLogger("ocpp")
 
-# HUF Stripe minimum – ennél kisebb összeget nem lehet capture-ölni
-_STRIPE_MIN_HUF = 1000
+# Üzleti minimum (HUF) – ennél kisebb összeget nem vonunk le. Közös forrás: ocpp_utils.MIN_CHARGE_HUF
+_STRIPE_MIN_HUF = MIN_CHARGE_HUF
 
 
 def _recalc_energy_and_cost(cs: ChargeSession) -> None:
@@ -266,15 +266,10 @@ async def stop_transaction(cp_id: str, payload: dict) -> None:
                         billing_type=cs.intent.billing_type,
                     )
                     if invoice_number:
+                        # cs még ehhez a session-höz kötött; a fenti session.commit() (215. sor)
+                        # után újra dirty-vé tesszük és commitoljuk – nem kell külön DB session.
                         cs.invoice_number = invoice_number
-                        async with AsyncSessionLocal() as upd:
-                            await upd.execute(
-                                __import__("sqlalchemy").text(
-                                    "UPDATE charge_sessions SET invoice_number=:inv WHERE id=:sid"
-                                ),
-                                {"inv": invoice_number, "sid": cs.id},
-                            )
-                            await upd.commit()
+                        await session.commit()
 
     except Exception as e:
         logger.exception(f"Hiba StopTransaction mentésekor: {e}")
