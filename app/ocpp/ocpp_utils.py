@@ -5,6 +5,10 @@ from __future__ import annotations
 import os
 from typing import Any, Optional
 
+# Üzleti minimum (HUF): ennél kisebb összeget nem vonunk le / nem számlázunk.
+# (Stripe technikai HUF-minimum külön ~175 Ft.) Egyetlen forrás – ne duplikáld!
+MIN_CHARGE_HUF = 500
+
 
 def _as_float(v: Any) -> Optional[float]:
     try:

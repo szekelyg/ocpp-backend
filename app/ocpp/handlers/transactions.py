@@ -15,14 +15,14 @@ from app.db.models import ChargePoint, ChargeSession, ChargingIntent
 from datetime import timezone
 
 from app.ocpp.time_utils import parse_ocpp_timestamp, utcnow
-from app.ocpp.ocpp_utils import _as_float, _as_int, _price_huf_per_kwh
+from app.ocpp.ocpp_utils import MIN_CHARGE_HUF, _as_float, _as_int, _price_huf_per_kwh
 from app.services.email import send_receipt_email
 from app.services.invoice import create_session_invoice
 
 logger = logging.getLogger("ocpp")
 
-# HUF Stripe minimum – ennél kisebb összeget nem lehet capture-ölni
-_STRIPE_MIN_HUF = 1000
+# Üzleti minimum (HUF) – ennél kisebb összeget nem vonunk le. Közös forrás: ocpp_utils.MIN_CHARGE_HUF
+_STRIPE_MIN_HUF = MIN_CHARGE_HUF
 
 
 def _recalc_energy_and_cost(cs: ChargeSession) -> None:

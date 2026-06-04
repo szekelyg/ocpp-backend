@@ -8,11 +8,13 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_db
 from app.db.models import ChargePoint
+from app.ocpp.ocpp_utils import MIN_CHARGE_HUF
 
 router = APIRouter(prefix="/charge-points", tags=["charge-points"])
 
 OFFLINE_TTL = timedelta(seconds=120)
-_STRIPE_MIN_HUF = 1000
+# Üzleti minimum (HUF) – közös forrás: ocpp_utils.MIN_CHARGE_HUF
+_STRIPE_MIN_HUF = MIN_CHARGE_HUF
 
 
 def _price_per_kwh() -> float:
