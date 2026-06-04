@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import AppHeader from "../components/ui/AppHeader";
+import AppFooter from "../components/ui/AppFooter";
 import MapView from "../components/map/MapView";
 import ChargerList from "../components/chargers/ChargerList";
 import ChargerToolbar from "../components/chargers/ChargerToolbar";
@@ -201,12 +202,11 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="text-xs text-slate-600 text-center pb-2">
-              © {new Date().getFullYear()} Energiafelhő Kft.
-            </div>
           </div>
         </div>
       </div>
+
+      <AppFooter />
     </div>
   );
 }

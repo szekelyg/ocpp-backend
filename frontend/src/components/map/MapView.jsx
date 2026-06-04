@@ -2,12 +2,13 @@ import {
   MapContainer,
   TileLayer,
   Marker,
+  CircleMarker,
   Popup,
   useMap,
   useMapEvents,
 } from "react-leaflet";
 import L from "leaflet";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import StatusBadge from "../ui/StatusBadge";
 import { placeLines } from "../../utils/format";
 
@@ -134,6 +135,86 @@ function FitInitialBounds({ points }) {
   return null;
 }
 
+// "Hol vagyok?" gomb – NEM automatikus. Alapból marad az országos nézet;
+// csak kattintásra kéri el a helyzetet és zoomol oda.
+function LocateControl() {
+  const map = useMap();
+  const [userPos, setUserPos] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const btnRef = useRef(null);
+
+  // a gombra kattintás ne mozgassa/zoomolja a térképet alatta
+  useEffect(() => {
+    if (!btnRef.current) return;
+    L.DomEvent.disableClickPropagation(btnRef.current);
+    L.DomEvent.disableScrollPropagation(btnRef.current);
+  }, []);
+
+  const locate = () => {
+    if (!("geolocation" in navigator)) {
+      setErr("A böngésződ nem támogatja a helymeghatározást.");
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    navigator.geolocation.getCurrentPosition(
+      (p) => {
+        const ll = [p.coords.latitude, p.coords.longitude];
+        setUserPos(ll);
+        viewCache.hasUserView = true; // ne fitelje vissza az egész országra
+        map.flyTo(ll, 15, { duration: 0.8 });
+        setBusy(false);
+      },
+      (e) => {
+        setBusy(false);
+        setErr(
+          e.code === 1
+            ? "Helymeghatározás letiltva a böngészőben."
+            : "Nem sikerült a helymeghatározás."
+        );
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
+    );
+  };
+
+  return (
+    <>
+      <div
+        ref={btnRef}
+        className="absolute top-3 right-3 z-[1000] flex flex-col items-end gap-2"
+      >
+        <button
+          type="button"
+          onClick={locate}
+          disabled={busy}
+          title="Hol vagyok?"
+          aria-label="Hol vagyok?"
+          className="flex items-center gap-1.5 rounded-full bg-white/95 hover:bg-white text-slate-800 shadow-lg border border-slate-300 px-3 py-2 text-sm font-medium disabled:opacity-60 transition"
+        >
+          <span className="text-base leading-none">{busy ? "⏳" : "📍"}</span>
+          <span className="hidden sm:inline">{busy ? "Keresés…" : "Hol vagyok?"}</span>
+        </button>
+        {err && (
+          <div className="max-w-[220px] rounded-lg bg-red-600/95 text-white text-xs px-2.5 py-1.5 shadow-lg">
+            {err}
+          </div>
+        )}
+      </div>
+
+      {userPos && (
+        <CircleMarker
+          center={userPos}
+          radius={9}
+          pathOptions={{ color: "#2563eb", weight: 3, fillColor: "#3b82f6", fillOpacity: 0.5 }}
+        >
+          <Popup>Itt vagy</Popup>
+        </CircleMarker>
+      )}
+    </>
+  );
+}
+
 const STARTABLE = new Set(["available", "preparing", "finishing"]);
 
 export default function MapView({ points = [], onSelect, onStartFlow }) {
@@ -150,7 +231,7 @@ export default function MapView({ points = [], onSelect, onStartFlow }) {
       center={centerFallback}
       zoom={12}
       scrollWheelZoom
-      className="h-full w-full"
+      className="relative h-full w-full"
     >
       <InvalidateSize />
       <ViewPersistence />
@@ -161,6 +242,7 @@ export default function MapView({ points = [], onSelect, onStartFlow }) {
       />
 
       <FitInitialBounds points={mappable} />
+      <LocateControl />
 
       {mappable.map((cp) => {
         const lines = placeLines(cp);
