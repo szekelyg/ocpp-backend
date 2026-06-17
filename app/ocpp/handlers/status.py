@@ -59,7 +59,13 @@ async def save_status_notification(cp_id: str, payload: dict) -> None:
                 return
 
             cp.status = incoming
+            cp.ocpi_last_updated = utcnow()
+            loc_id = cp.location_id
             await session.commit()
+
+        # OCPI: a státuszváltást best-effort továbbítjuk a regisztrált partnereknek
+        from app.ocpi.services.push_service import schedule_push_location
+        schedule_push_location(loc_id)
 
     except Exception as e:
         logger.exception(f"Hiba StatusNotification mentésekor: {e}")

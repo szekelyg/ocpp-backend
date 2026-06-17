@@ -16,6 +16,8 @@ from app.api.routers.sessions import router as sessions_router
 from app.api.routers.payments_stripe import router as payments_stripe_router
 from app.api.routers.intents import router as intents_router
 from app.api.routers.admin import router as admin_router
+from app.ocpi.router import router as ocpi_router
+from app.ocpi.errors import add_ocpi_exception_handlers
 from app.ocpp.ocpp_ws import handle_ocpp
 
 logger = logging.getLogger("backend")
@@ -170,7 +172,7 @@ async def _expire_stale_charging_sessions_once() -> None:
         async with AsyncSessionLocal() as db:
             from app.db.models import ChargeSession as CS, ChargePoint as CP
             from app.ocpp.time_utils import utcnow as _now
-            from app.ocpp.ocpp_utils import _price_huf_per_kwh
+            from app.ocpp.ocpp_utils import effective_price_huf_per_kwh
             row = (await db.execute(
                 select(CS).where(CS.id == cs.id)
             )).scalar_one_or_none()
@@ -184,7 +186,8 @@ async def _expire_stale_charging_sessions_once() -> None:
                 if diff >= 0:
                     row.energy_kwh = diff / 1000.0
                     energy_kwh_val = row.energy_kwh
-            price = _price_huf_per_kwh()
+            # ár: per-intent override (admin teszt), ha van; cs.intent be van töltve (selectinload)
+            price = effective_price_huf_per_kwh(cs.intent)
             if price is not None and row.energy_kwh is not None:
                 row.cost_huf = float(row.energy_kwh) * float(price)
                 cost_huf_val = row.cost_huf
@@ -222,6 +225,11 @@ async def _expire_stale_charging_sessions_once() -> None:
                 cost_huf=cost_huf_val,
             )
 
+        # OCPI: CDR pillanatkép a (kiesés miatt) lezárt töltésről is (best-effort)
+        if finished_at_val is not None:
+            from app.ocpi.services.cdr_service import snapshot_session_cdr
+            await snapshot_session_cdr(cs.id)
+
 
 async def _waiting_timeout_loop() -> None:
     logger.info("WaitingTimeout background task started")
@@ -257,6 +265,10 @@ app.include_router(sessions_router, prefix="/api")
 app.include_router(payments_stripe_router, prefix="/api")
 app.include_router(intents_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
+
+# OCPI 2.2.1 (CPO role) – own "/ocpi" prefix, sibling of "/api"
+app.include_router(ocpi_router)
+add_ocpi_exception_handlers(app)
 
 
 # Megjegyzés: a GetConfiguration / ChangeConfiguration / Reset admin műveletek
@@ -301,7 +313,7 @@ async def spa_fallback(full_path: str):
     SPA fallback: minden nem-API útvonal index.html-t kap (React Router).
     Egyedi statikus fájlokat (favicon, vite.svg stb.) közvetlenül szolgálunk ki.
     """
-    if full_path.startswith(("api/", "ocpp", "test/")):
+    if full_path.startswith(("api/", "ocpp", "ocpi", "test/")):
         raise HTTPException(status_code=404, detail="Not Found")
 
     # Konkrét statikus fájl (pl. /vite.svg, /favicon.ico)

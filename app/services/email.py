@@ -5,7 +5,7 @@ Email küldés Resend API-on keresztül (https://resend.com).
 Konfig /etc/ocpp-backend.env-ben:
   RESEND_API_KEY=re_xxxxxxxxxxxx
   RESEND_FROM=szerviz@energiafelho.hu     (opcionális, ez az alapértelmezett)
-  PUBLIC_BASE_URL=https://ev.napos.hu (session link generáláshoz)
+  PUBLIC_BASE_URL=https://ev.energiafelho.hu (session link generáláshoz)
 """
 from __future__ import annotations
 

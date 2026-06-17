@@ -5,9 +5,22 @@ from __future__ import annotations
 import os
 from typing import Any, Optional
 
-# Üzleti minimum (HUF): ennél kisebb összeget nem vonunk le / nem számlázunk.
-# (Stripe technikai HUF-minimum külön ~175 Ft.) Egyetlen forrás – ne duplikáld!
-MIN_CHARGE_HUF = 500
+def _min_charge_huf() -> int:
+    """
+    Üzleti minimum (HUF): ennél kisebb összeget nem vonunk le / nem számlázunk.
+    Env-ből felülírható a STRIPE_MIN_HUF változóval (alapértelmezés 500).
+    FIGYELEM: a Stripe technikai HUF-minimuma külön ~175 Ft – ez alatti capture-t
+    a Stripe elutasít, ezért élesben ne állítsd 175 alá, ha ténylegesen terhelni akarsz.
+    """
+    v = os.environ.get("STRIPE_MIN_HUF")
+    try:
+        return int(float(v)) if v else 500
+    except (ValueError, TypeError):
+        return 500
+
+
+# Üzleti minimum (HUF) – egyetlen forrás, ne duplikáld! (env: STRIPE_MIN_HUF)
+MIN_CHARGE_HUF = _min_charge_huf()
 
 
 def _as_float(v: Any) -> Optional[float]:
@@ -76,3 +89,33 @@ def _price_huf_per_kwh() -> Optional[float]:
         return x if x >= 0 else None
     except Exception:
         return None
+
+
+def effective_price_huf_per_kwh(intent=None) -> Optional[float]:
+    """
+    Per-intent ár-override (ChargingIntent.price_huf_per_kwh), ha van; különben a
+    globális env ár. Az intent-et a hívónak már be kell töltenie (async lazy-load tilos).
+    """
+    if intent is not None:
+        p = getattr(intent, "price_huf_per_kwh", None)
+        if p is not None:
+            try:
+                return float(p)
+            except (ValueError, TypeError):
+                pass
+    return _price_huf_per_kwh()
+
+
+def effective_min_charge_huf(intent=None) -> int:
+    """
+    Per-intent minimum/capture-override (ChargingIntent.min_charge_huf), ha van;
+    különben a globális üzleti minimum (MIN_CHARGE_HUF).
+    """
+    if intent is not None:
+        m = getattr(intent, "min_charge_huf", None)
+        if m is not None:
+            try:
+                return int(m)
+            except (ValueError, TypeError):
+                pass
+    return MIN_CHARGE_HUF

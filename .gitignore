@@ -2,4 +2,9 @@ venv/
 __pycache__/
 *.pyc
 .env
+.claude/
 frontend/src__bak*/
+deploy/backups/
+backups/
+*.sql.gz
+*.sql

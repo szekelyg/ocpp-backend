@@ -31,7 +31,13 @@ def compute_status(cp: ChargePoint) -> str:
 
     now = datetime.now(timezone.utc)
 
-    if now - cp.last_seen_at > OFFLINE_TTL:
+    # Defensive: treat a naive last_seen_at as UTC so we never mix naive/aware
+    # (production stores tz-aware UTC; this guards imports/legacy rows).
+    last_seen = cp.last_seen_at
+    if last_seen.tzinfo is None:
+        last_seen = last_seen.replace(tzinfo=timezone.utc)
+
+    if now - last_seen > OFFLINE_TTL:
         # Ha aktívan tölt, ne jelöljük offline-nak csak azért mert nincs heartbeat
         # (töltés közben egyes CP-k nem küldenek rendszeres heartbeat-et)
         if (cp.status or "").lower() == "charging":

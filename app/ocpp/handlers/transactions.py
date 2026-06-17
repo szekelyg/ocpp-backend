@@ -15,7 +15,10 @@ from app.db.models import ChargePoint, ChargeSession, ChargingIntent
 from datetime import timezone
 
 from app.ocpp.time_utils import parse_ocpp_timestamp, utcnow
-from app.ocpp.ocpp_utils import MIN_CHARGE_HUF, _as_float, _as_int, _price_huf_per_kwh
+from app.ocpp.ocpp_utils import (
+    MIN_CHARGE_HUF, _as_float, _as_int, _price_huf_per_kwh,
+    effective_price_huf_per_kwh, effective_min_charge_huf,
+)
 from app.services.email import send_receipt_email
 from app.services.invoice import create_session_invoice
 
@@ -25,7 +28,7 @@ logger = logging.getLogger("ocpp")
 _STRIPE_MIN_HUF = MIN_CHARGE_HUF
 
 
-def _recalc_energy_and_cost(cs: ChargeSession) -> None:
+def _recalc_energy_and_cost(cs: ChargeSession, intent=None) -> None:
     # preferált: meterStart/meterStop
     if cs.meter_start_wh is not None and cs.meter_stop_wh is not None:
         try:
@@ -36,8 +39,8 @@ def _recalc_energy_and_cost(cs: ChargeSession) -> None:
         except Exception:
             pass
 
-    # ár opcionális
-    price = _price_huf_per_kwh()
+    # ár: per-intent override (admin teszt), ha van; különben globális env ár
+    price = effective_price_huf_per_kwh(intent)
     if price is not None and cs.energy_kwh is not None:
         try:
             cs.cost_huf = float(cs.energy_kwh) * float(price)
@@ -170,7 +173,7 @@ async def stop_transaction(cp_id: str, payload: dict) -> None:
             cs.meter_stop_wh = meter_stop
 
             # 1) preferált: meterStart/meterStop
-            _recalc_energy_and_cost(cs)
+            _recalc_energy_and_cost(cs, cs.intent)
 
             # 2) Mismatch fallback: meter_start_wh >> meter_stop_wh
             # Ez akkor fordul elő, ha a töltő lifetime countert küldött MeterValues-ban
@@ -181,7 +184,7 @@ async def stop_transaction(cp_id: str, payload: dict) -> None:
                 stop_wh = float(meter_stop)
                 if start_wh > stop_wh > 0 and stop_wh < 100_000:
                     cs.energy_kwh = stop_wh / 1000.0
-                    price = _price_huf_per_kwh()
+                    price = effective_price_huf_per_kwh(cs.intent)
                     if price is not None:
                         cs.cost_huf = cs.energy_kwh * float(price)
                     logger.info(
@@ -205,12 +208,13 @@ async def stop_transaction(cp_id: str, payload: dict) -> None:
                 if first_wh is not None and last_wh is not None and last_wh >= first_wh:
                     cs.energy_kwh = (last_wh - first_wh) / 1000.0
 
-                _recalc_energy_and_cost(cs)
+                _recalc_energy_and_cost(cs, cs.intent)
 
             # cp.status-t NEM állítjuk "available"-re – a töltő hamarosan küld
             # StatusNotification-t a tényleges fizikai állapottal (pl. "preparing"
             # ha az autó még be van dugva). Azt a save_status_notification kezeli.
             cp.last_seen_at = utcnow()
+            cs.ocpi_last_updated = utcnow()  # OCPI: jelzi a partnereknek, hogy a session frissült
 
             await session.commit()
             logger.info(
@@ -271,6 +275,13 @@ async def stop_transaction(cp_id: str, payload: dict) -> None:
                         cs.invoice_number = invoice_number
                         await session.commit()
 
+            # OCPI: immutábilis CDR pillanatkép (best-effort, saját DB sessionnel).
+            # A roaming partnerek innen kérik le a lezárt töltések számlázási rekordját.
+            from app.ocpi.services.cdr_service import snapshot_session_cdr
+            from app.ocpi.services.push_service import schedule_push_session
+            await snapshot_session_cdr(cs.id)
+            schedule_push_session(cs.id)
+
     except Exception as e:
         logger.exception(f"Hiba StopTransaction mentésekor: {e}")
 
@@ -281,7 +292,7 @@ def _captured_amount(cs: ChargeSession) -> float:
     hold = (cs.intent.hold_amount_huf or 0) if cs.intent else 0
     if cost <= 0:
         return 0.0
-    captured = max(_STRIPE_MIN_HUF, round(cost))
+    captured = max(effective_min_charge_huf(cs.intent), round(cost))
     captured = min(captured, hold)
     return float(captured)
 
@@ -314,13 +325,14 @@ async def _stripe_settle(cs: ChargeSession) -> None:
         else:
             # Bármennyi energia felhasználva → levonás.
             # Stripe HUF minimum = 175 Ft; ha a díj ez alatt van, legalább 175 Ft-ot vonunk le.
-            capture_huf = max(_STRIPE_MIN_HUF, round(cost))
+            eff_min = effective_min_charge_huf(intent)
+            capture_huf = max(eff_min, round(cost))
             capture_huf = min(capture_huf, hold)  # nem haladhatja meg a zárolást
             capture_filler = capture_huf * 100     # Stripe fillérben számolja a HUF-ot
             stripe.PaymentIntent.capture(pi_id, amount_to_capture=capture_filler)
             logger.info(
                 f"Stripe capture: pi={pi_id} capture_huf={capture_huf} "
-                f"(cost={cost:.2f}, min={_STRIPE_MIN_HUF}, hold={hold}) session_id={cs.id}"
+                f"(cost={cost:.2f}, min={eff_min}, hold={hold}) session_id={cs.id}"
             )
     except stripe.error.InvalidRequestError as e:
         # pl. már cancel-elve / capture-ölve van (idempotens retry esetén)

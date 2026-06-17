@@ -287,6 +287,39 @@ function ChargersTab({ chargers, apiFetch, toast }) {
   const [configOpen, setConfigOpen] = useState(null);
   const [configData, setConfigData] = useState(null);
   const [configLoading, setConfigLoading] = useState(false);
+  const [testBusy, setTestBusy] = useState(null);
+
+  const STARTABLE = ["available", "preparing", "finishing"];
+
+  async function doTestCharge(cp) {
+    const email = window.prompt(
+      "Teszt töltés – ide megy a bizonylat/számla:",
+      "szerviz@energiafelho.hu"
+    );
+    if (email === null) return; // mégse
+    setTestBusy(cp.id);
+    try {
+      const res = await apiFetch(`/api/admin/charge-points/${cp.id}/test-charge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          connector_id: 1,
+          email: email.trim() || undefined,
+          hold_amount_huf: 5000,
+        }),
+      });
+      if (res.checkout_url) {
+        toast(`Teszt fizetés megnyitva (intent #${res.intent_id})`, "ok");
+        window.open(res.checkout_url, "_blank", "noopener");
+      } else {
+        toast("Nem érkezett checkout link", "err");
+      }
+    } catch (e) {
+      toast(`Teszt töltés hiba: ${e.message}`, "err");
+    } finally {
+      setTestBusy(null);
+    }
+  }
 
   async function doReset(cp, type = "Soft") {
     setResetBusy(cp.id);
@@ -345,6 +378,14 @@ function ChargersTab({ chargers, apiFetch, toast }) {
                 <Td className="whitespace-nowrap text-xs">{fmtDate(cp.created_at)}</Td>
                 <Td>
                   <div className="flex gap-1.5 flex-wrap">
+                    {STARTABLE.includes(String(cp.status || "").toLowerCase()) && (
+                      <ActionBtn
+                        label="Teszt töltés" color="emerald"
+                        busy={testBusy === cp.id}
+                        onClick={() => doTestCharge(cp)}
+                        title="Admin teszt töltés a teljes Stripe-folyamaton (5 Ft/kWh, ~200 Ft capture)"
+                      />
+                    )}
                     <ActionBtn
                       label="Soft Reset" color="amber"
                       busy={resetBusy === cp.id}

@@ -2,7 +2,7 @@
 import logging
 import os
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -294,6 +294,125 @@ async def admin_get_cp_config(
         raise HTTPException(status_code=502, detail={"error": "ocpp_failed", "reason": str(e)})
 
 
+# ── Admin teszt-töltés (kedvezményes árazás, teljes Stripe-folyamat) ────────────
+
+# Admin teszt árazás – CSAK az így indított intentre érvényes (publikus árazás változatlan).
+_ADMIN_TEST_PRICE_HUF_PER_KWH = 5     # Ft/kWh
+_ADMIN_TEST_MIN_HUF = 200             # capture/minimum (a Stripe ~175 Ft HUF-min felett)
+
+
+class AdminTestChargeIn(BaseModel):
+    connector_id: int = 1
+    email: Optional[str] = None       # ide megy a bizonylat/számla; default: szerviz@…
+    hold_amount_huf: int = 5000       # ideiglenes zárolás (a végén csak ~200 Ft capture)
+
+
+@router.post("/charge-points/{cp_id}/test-charge")
+async def admin_test_charge(
+    cp_id: int,
+    body: AdminTestChargeIn,
+    db: AsyncSession = Depends(get_db),
+    _: HTTPBasicCredentials = Depends(verify_admin),
+):
+    """
+    Admin teszt-töltés a TELJES Stripe-folyamaton át, kedvezményes árazással:
+    5 Ft/kWh és ~200 Ft capture – CSAK erre az intentre (a publikus árazás NEM változik).
+    A visszaadott checkout linken (teszt/valódi kártyával) fizetsz; a töltés végén
+    a tényleges energia díja kerül levonásra, de legalább/legfeljebb a 200 Ft minimum.
+    """
+    import stripe as _stripe
+
+    cp = (await db.execute(select(ChargePoint).where(ChargePoint.id == cp_id))).scalar_one_or_none()
+    if not cp:
+        raise HTTPException(status_code=404, detail="ChargePoint not found")
+
+    status_now = compute_status(cp).lower()
+    if status_now not in {"available", "preparing", "finishing"}:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "charge_point_not_available", "status": status_now},
+        )
+
+    email = (body.email or os.environ.get("SZAMLAZZ_REPLY_EMAIL") or "szerviz@energiafelho.hu").strip()
+
+    intent = ChargingIntent(
+        charge_point_id=cp.id,
+        connector_id=int(body.connector_id),
+        anonymous_email=email,
+        status="pending_payment",
+        hold_amount_huf=int(body.hold_amount_huf),
+        expires_at=_utcnow() + timedelta(minutes=15),
+        billing_type="personal",
+        billing_name="Admin teszt",
+        billing_street="-",
+        billing_zip="-",
+        billing_city="-",
+        billing_country="HU",
+        # Per-intent override – csak ez a töltés lesz olcsó:
+        price_huf_per_kwh=_ADMIN_TEST_PRICE_HUF_PER_KWH,
+        min_charge_huf=_ADMIN_TEST_MIN_HUF,
+    )
+    db.add(intent)
+    await db.commit()
+    await db.refresh(intent)
+
+    try:
+        sk = os.environ.get("STRIPE_SECRET_KEY")
+        if not sk:
+            raise RuntimeError("Missing env: STRIPE_SECRET_KEY")
+        _stripe.api_key = sk
+        base_url = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+        if not base_url:
+            raise RuntimeError("Missing env: PUBLIC_BASE_URL")
+
+        meta = {
+            "intent_id": str(intent.id),
+            "charge_point_id": str(cp.id),
+            "connector_id": str(body.connector_id),
+            "admin_test": "1",
+        }
+        checkout = _stripe.checkout.Session.create(
+            mode="payment",
+            success_url=f"{base_url}/pay/success?intent_id={intent.id}",
+            cancel_url=f"{base_url}/pay/cancel?intent_id={intent.id}",
+            customer_email=email,
+            client_reference_id=str(intent.id),
+            metadata=meta,
+            line_items=[{
+                "price_data": {
+                    "currency": "huf",
+                    "product_data": {"name": "ADMIN TESZT – EV töltés"},
+                    "unit_amount": int(body.hold_amount_huf) * 100,
+                },
+                "quantity": 1,
+            }],
+            payment_intent_data={"metadata": meta, "capture_method": "manual"},
+            idempotency_key=f"admin-test:{intent.id}",
+        )
+    except Exception as e:
+        logger.exception("admin_test_charge stripe checkout failed intent_id=%s", intent.id)
+        try:
+            intent.status = "failed"
+            intent.last_error = str(e)[:255]
+            intent.updated_at = _utcnow()
+            await db.commit()
+        except Exception:
+            await db.rollback()
+        raise HTTPException(status_code=502, detail={"error": "stripe_checkout_create_failed", "reason": str(e)})
+
+    intent.payment_provider = "stripe"
+    intent.payment_provider_ref = checkout.get("id")
+    intent.updated_at = _utcnow()
+    await db.commit()
+
+    return {
+        "ok": True,
+        "intent_id": intent.id,
+        "checkout_url": checkout.get("url"),
+        "note": "Admin teszt: 5 Ft/kWh, ~200 Ft capture. Publikus árazás változatlan.",
+    }
+
+
 # ── Sessions ──────────────────────────────────────────────────────────────────
 
 @router.get("/sessions")
@@ -361,12 +480,16 @@ async def admin_force_close_session(
         return {"ok": True, "already_finished": True, "session": _session_dict(s)}
 
     s.finished_at = _utcnow()
-    _recalc_energy_and_cost(s)
+    _recalc_energy_and_cost(s, s.intent)
     await db.commit()
     await db.refresh(s)
 
     # Stripe settle (capture/cancel) – nem dob kivételt, csak logol
     await _stripe_settle(s)
+
+    # OCPI: CDR pillanatkép a kézzel lezárt töltésről is (best-effort)
+    from app.ocpi.services.cdr_service import snapshot_session_cdr
+    await snapshot_session_cdr(s.id)
 
     return {"ok": True, "session": _session_dict(s)}
 
