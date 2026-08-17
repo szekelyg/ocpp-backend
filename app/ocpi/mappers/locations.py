@@ -82,9 +82,14 @@ def evse_from_cp(cp: ChargePoint) -> EVSE:
     )
 
 
+def published_charge_points(loc: LocationORM) -> list[ChargePoint]:
+    """Csak a publikált töltők – konfigurálásra váró EVSE-t nem hirdetünk meg."""
+    return [cp for cp in (loc.charge_points or []) if cp.is_published]
+
+
 def location_from_orm(loc: LocationORM) -> Location:
     street, city, postal = _parse_hu_address(loc.address_text)
-    evses = [evse_from_cp(cp) for cp in (loc.charge_points or [])]
+    evses = [evse_from_cp(cp) for cp in published_charge_points(loc)]
     return Location(
         country_code=(loc.country_code or config.country_code()),
         party_id=(loc.party_id or config.party_id()),
@@ -104,7 +109,7 @@ def location_from_orm(loc: LocationORM) -> Location:
 
 
 def find_evse(loc: LocationORM, evse_uid: str) -> Optional[ChargePoint]:
-    for cp in (loc.charge_points or []):
+    for cp in published_charge_points(loc):
         if ids.evse_uid(cp) == evse_uid:
             return cp
     return None

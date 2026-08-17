@@ -3,7 +3,7 @@ from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_db
@@ -69,8 +69,11 @@ def _cp_dict(cp: ChargePoint) -> dict:
 
 @router.get("/", response_model=list[dict])
 async def list_charge_points(db: AsyncSession = Depends(get_db)):
+    """Csak publikált töltők – a konfigurálásra váró új töltők nem látszanak."""
     result = await db.execute(
-        select(ChargePoint).options(selectinload(ChargePoint.location))
+        select(ChargePoint)
+        .options(selectinload(ChargePoint.location))
+        .where(ChargePoint.is_published.is_(True))
     )
     items = result.scalars().all()
     return [_cp_dict(cp) for cp in items]
@@ -81,7 +84,7 @@ async def get_charge_point(cp_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(ChargePoint)
         .options(selectinload(ChargePoint.location))
-        .where(ChargePoint.id == cp_id)
+        .where(and_(ChargePoint.id == cp_id, ChargePoint.is_published.is_(True)))
     )
     cp = result.scalar_one_or_none()
 

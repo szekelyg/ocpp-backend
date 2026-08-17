@@ -67,20 +67,39 @@ async def start_transaction(cp_id: str, payload: dict) -> Optional[int]:
 
             # 0) Ha már van nyitott, de még nem kapott ocpp_transaction_id-t,
             # akkor azt használjuk (dupla session védelem).
-            res_existing = await session.execute(
-                select(ChargeSession)
-                .where(
-                    and_(
-                        ChargeSession.charge_point_id == cp.id,
-                        ChargeSession.finished_at.is_(None),
-                        ChargeSession.connector_id == connector_id,
-                        ChargeSession.ocpp_transaction_id.is_(None),
-                    )
+            async def _find_pending(match_connector: bool):
+                conds = [
+                    ChargeSession.charge_point_id == cp.id,
+                    ChargeSession.finished_at.is_(None),
+                    ChargeSession.ocpp_transaction_id.is_(None),
+                ]
+                if match_connector:
+                    conds.append(ChargeSession.connector_id == connector_id)
+                res = await session.execute(
+                    select(ChargeSession)
+                    .where(and_(*conds))
+                    .order_by(ChargeSession.id.desc())
+                    .limit(1)
                 )
-                .order_by(ChargeSession.id.desc())
-                .limit(1)
-            )
-            existing = res_existing.scalar_one_or_none()
+                return res.scalar_one_or_none()
+
+            existing = await _find_pending(match_connector=True) if connector_id is not None else None
+
+            if existing is None:
+                # Fallback: a töltő más csatlakozó-számot (vagy semmit) küldött, mint
+                # amire a fizetés szólt. A töltőn EGY nyitott, indulásra váró session
+                # van – ahhoz kötjük, különben a kifizetett session tx nélkül maradna
+                # (15 perc múlva timeout + zárolás feloldás), a tényleges töltés pedig
+                # egy fizetéshez nem kötött, számlázatlan sessionbe futna.
+                existing = await _find_pending(match_connector=False)
+                if existing is not None:
+                    logger.warning(
+                        f"StartTransaction connector eltérés: cp={cp_id} "
+                        f"töltő connectorId={connector_id} vs. session connector_id={existing.connector_id} "
+                        f"→ a nyitott session-höz kötve (session_id={existing.id})"
+                    )
+                    if connector_id is not None:
+                        existing.connector_id = connector_id
 
             if existing:
                 cs = existing

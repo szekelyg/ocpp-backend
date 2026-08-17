@@ -18,7 +18,7 @@ from app.db.models import ChargePoint, ChargeSession, Location, OcpiCdr, OcpiPar
 
 from .. import config, enums, push
 from ..mappers.cdrs import cdr_orm_to_schema
-from ..mappers.locations import location_from_orm
+from ..mappers.locations import location_from_orm, published_charge_points
 from ..mappers.sessions import session_from_orm
 
 logger = logging.getLogger("ocpi")
@@ -53,6 +53,9 @@ async def push_location(location_id: int) -> None:
                 )
             ).scalar_one_or_none()
             if loc is None:
+                return
+            if not published_charge_points(loc):
+                # Csak konfigurálásra váró töltő van rajta – nincs mit hirdetni.
                 return
             parties = await _registered_parties(db)
             payload = location_from_orm(loc).model_dump(mode="json", exclude_none=True)

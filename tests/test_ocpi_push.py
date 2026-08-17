@@ -34,7 +34,8 @@ async def _seed_finished_session():
         s.add(loc)
         await s.flush()
         cp = ChargePoint(ocpp_id="PUSH-CP", location_id=loc.id, connector_type="Type 2", max_power_kw=22.0,
-                         status="available", ocpi_evse_uid="PUSH-CP", last_seen_at=utcnow())
+                         status="available", ocpi_evse_uid="PUSH-CP", last_seen_at=utcnow(),
+                         is_published=True)
         s.add(cp)
         await s.flush()
         cs = ChargeSession(charge_point_id=cp.id, connector_id=1, ocpp_transaction_id="900",

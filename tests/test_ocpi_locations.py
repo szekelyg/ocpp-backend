@@ -17,7 +17,7 @@ async def _seed_location(*, ocpp_id="CP001", status="available", last_seen=True)
         cp = ChargePoint(
             ocpp_id=ocpp_id, location_id=loc.id,
             connector_type="Type 2", max_power_kw=22.0,
-            status=status, ocpi_evse_uid=ocpp_id,
+            status=status, ocpi_evse_uid=ocpp_id, is_published=True,
             last_seen_at=utcnow() if last_seen else None,
         )
         s.add(cp)
