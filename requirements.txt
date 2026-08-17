@@ -2,6 +2,9 @@ fastapi
 uvicorn[standard]
 sqlalchemy>=2.0
 asyncpg
+# Az alembic sync drivert használ (alembic/env.py: asyncpg -> psycopg csere),
+# enélkül az "alembic upgrade head" ModuleNotFoundError-ral áll meg.
+psycopg[binary]
 alembic
 pydantic
 pydantic-settings
