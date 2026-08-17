@@ -8,3 +8,4 @@ deploy/backups/
 backups/
 *.sql.gz
 *.sql
+node_modules/
