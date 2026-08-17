@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getCurrentPosition, ACCURACY_WARN_M } from "../utils/geolocate";
+import CoordPicker from "../components/map/CoordPicker";
 
 const REFRESH_MS = 15_000;
 
@@ -358,6 +359,20 @@ function ChargerConfigModal({ cp, busy, onClose, onSave }) {
     (form.latitude !== "" && !Number.isFinite(Number(form.latitude))) ||
     (form.longitude !== "" && !Number.isFinite(Number(form.longitude)));
 
+  // Az ellenőrző térkép csak akkor jelenik meg, ha van értelmes pont.
+  const pickerLat = Number(form.latitude);
+  const pickerLng = Number(form.longitude);
+  const showPicker =
+    form.latitude !== "" && form.longitude !== "" && !coordsBad &&
+    Number.isFinite(pickerLat) && Number.isFinite(pickerLng);
+
+  // Térképi igazítás után a mezők is a marker helyét mutatják, és a
+  // pontosság-visszajelzés eltűnik – az már nem a mért pozícióra igaz.
+  const pickFromMap = (lat, lng) => {
+    setForm(f => ({ ...f, latitude: lat.toFixed(6), longitude: lng.toFixed(6) }));
+    setGeoAccuracy(null);
+  };
+
   return (
     <div className="fixed inset-0 bg-ink/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div
@@ -428,6 +443,16 @@ function ChargerConfigModal({ cp, busy, onClose, onSave }) {
                   Beolvasva, pontosság ±{Math.round(geoAccuracy)} m. Mentés előtt érdemes ránézni a térképen.
                 </div>
               )
+            )}
+
+            {showPicker && (
+              <>
+                <CoordPicker lat={pickerLat} lng={pickerLng} onPick={pickFromMap} />
+                <div className="text-xs text-ink-muted">
+                  Ezt a pontot látja a vásárló. Ha nem stimmel, húzd a markert a helyére, vagy kattints a
+                  térképre.
+                </div>
+              </>
             )}
 
             <div className="text-xs text-ink-muted">
