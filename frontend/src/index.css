@@ -75,6 +75,8 @@
 
   /* chip – csatlakozó / teljesítmény címkék */
   .chip { @apply inline-flex items-center gap-1 rounded-lg bg-brand-panel border border-brand-line px-2.5 py-1 text-xs text-ink-soft; }
+  /* Korlátozott teljesítményű állomás – a 22 kW-nál kevesebb ne csússzon el a szemnek. */
+  .chipWarn { @apply inline-flex items-center gap-1 rounded-lg bg-brand-cream border border-brand-yellow/60 px-2.5 py-1 text-xs font-semibold text-brand-amber; }
 
   /* map */
   .mapFrame { @apply h-[520px] w-full; }

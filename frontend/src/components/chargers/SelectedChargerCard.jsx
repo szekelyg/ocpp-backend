@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import StatusBadge from "../ui/StatusBadge";
 import { placeLines, timeAgo } from "../../utils/format";
+import { isPowerLimited, TYPE2_NOMINAL_KW } from "../../utils/power";
 import PayModal from "../ui/PayModal";
 import LoginAutofill, { AUTH_TOKEN_KEY } from "../ui/LoginAutofill";
 
@@ -216,11 +217,22 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
             </span>
           )}
           {cp.max_power_kw && (
-            <span className="chip">
-              <span className="text-ink-muted">Max. teljesítmény</span>
-              <span className="font-semibold text-ink">{cp.max_power_kw} kW</span>
+            <span className={isPowerLimited(cp) ? "chipWarn" : "chip"}>
+              <span className={isPowerLimited(cp) ? "" : "text-ink-muted"}>Max. teljesítmény</span>
+              <span className={isPowerLimited(cp) ? "font-bold" : "font-semibold text-ink"}>
+                {cp.max_power_kw} kW
+              </span>
             </span>
           )}
+        </div>
+      )}
+
+      {/* A töltő házán 22 kW szerepel – ha az állomás ez alá van korlátozva, mondjuk ki. */}
+      {isPowerLimited(cp) && (
+        <div className="hint">
+          Ez az állomás <span className="font-bold">{cp.max_power_kw} kW</span>-ra van korlátozva,
+          a töltő címkéjén szereplő {TYPE2_NOMINAL_KW} kW helyett — a töltés ennek megfelelően
+          lassabb. A díj ettől nem változik: csak a felhasznált energiát fizeti.
         </div>
       )}
 
@@ -299,6 +311,23 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
               </div>
             )}
           </div>
+        )}
+
+        {/* Teljesítmény a fizetés ELŐTT – korlátozott állomásnál ez a legfontosabb
+            információ, amit a vezető a töltő címkéjéről nem tud meg. */}
+        {cp.max_power_kw > 0 && (
+          isPowerLimited(cp) ? (
+            <div className="mt-3 hint">
+              Ez az állomás <span className="font-bold">{cp.max_power_kw} kW</span>-ra van
+              korlátozva (a töltő címkéjén {TYPE2_NOMINAL_KW} kW szerepel) — a töltés lassabb lesz.
+              Csak a felhasznált energiát fizeti.
+            </div>
+          ) : (
+            <div className="mt-3 text-xs text-ink-muted">
+              Az állomás felső korlátja {cp.max_power_kw} kW. A tényleges teljesítmény az autó
+              fedélzeti töltőjétől is függ.
+            </div>
+          )
         )}
 
         {/* Hold magyarázat */}

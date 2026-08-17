@@ -11,6 +11,7 @@ import L from "leaflet";
 import { useEffect, useMemo, useRef, useState } from "react";
 import StatusBadge from "../ui/StatusBadge";
 import { placeLines } from "../../utils/format";
+import { isPowerLimited } from "../../utils/power";
 
 // Státusz → szín
 // A matrica-paletta színei
@@ -268,8 +269,12 @@ export default function MapView({ points = [], onSelect, onStartFlow }) {
                       </span>
                     )}
                     {cp.max_power_kw && (
-                      <span className="text-xs bg-brand-panel border border-brand-line rounded px-1.5 py-0.5 text-ink-soft">
-                        {cp.max_power_kw} kW
+                      <span className={
+                        isPowerLimited(cp)
+                          ? "text-xs bg-brand-cream border border-brand-yellow/60 rounded px-1.5 py-0.5 font-semibold text-brand-amber"
+                          : "text-xs bg-brand-panel border border-brand-line rounded px-1.5 py-0.5 text-ink-soft"
+                      }>
+                        max. {cp.max_power_kw} kW
                       </span>
                     )}
                   </div>

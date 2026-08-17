@@ -1,5 +1,6 @@
 import StatusBadge from "../ui/StatusBadge";
 import { placeLines, timeAgo } from "../../utils/format";
+import { isPowerLimited } from "../../utils/power";
 
 export default function ChargerListItem({ cp, selected, onClick }) {
   const lines = placeLines(cp);
@@ -24,7 +25,11 @@ export default function ChargerListItem({ cp, selected, onClick }) {
       {(cp.connector_type || cp.max_power_kw) && (
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           {cp.connector_type && <span className="chip">{cp.connector_type}</span>}
-          {cp.max_power_kw && <span className="chip">{cp.max_power_kw} kW</span>}
+          {cp.max_power_kw && (
+            <span className={isPowerLimited(cp) ? "chipWarn" : "chip"}>
+              max. {cp.max_power_kw} kW
+            </span>
+          )}
         </div>
       )}
 

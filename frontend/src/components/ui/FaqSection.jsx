@@ -18,7 +18,7 @@ const FAQ = [
   },
   {
     q: "Milyen autóval és csatlakozóval tölthetek?",
-    a: "Állomásaink Type 2 (AC) csatlakozóval rendelkeznek, legfeljebb 22 kW teljesítménnyel. A tényleges töltési teljesítmény az autó fedélzeti töltőjétől függ.",
+    a: "Állomásaink Type 2 (AC) csatlakozóval rendelkeznek. A felső teljesítmény-korlát állomásonként eltér — van, ahol a helyi hálózati bekötés miatt kevesebb, mint amennyit a töltő önmagában tudna. Mindig a kiválasztott töltő kártyáján szereplő „Max. teljesítmény” érvényes, ezt a fizetés előtt is kiírjuk. A tényleges töltési teljesítményt ezen felül az autó fedélzeti töltője is behatárolja.",
   },
   {
     q: "Mi van, ha hibát tapasztalok vagy megszakad a töltés?",
