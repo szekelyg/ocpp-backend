@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
+from app.api.routers.charge_points import compute_status
 from app.db.models import ChargePoint, ChargingIntent
 
 logger = logging.getLogger("intents")
@@ -66,17 +67,27 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
     if not cp:
         raise HTTPException(status_code=404, detail="ChargePoint not found")
 
+    # Konfigurálásra váró (publikálatlan) töltőn nem indítható publikus fizetés.
+    # Az admin teszt-töltés (/api/admin/charge-points/{id}/test-charge) szándékosan
+    # kihagyja ezt az ellenőrzést: publikálás előtt kell tudni tesztelni.
+    if not cp.is_published:
+        raise HTTPException(status_code=404, detail="ChargePoint not found")
+
     # "available"  → autó még nincs bedugva, RemoteStart után a CP Preparing-be megy és vár
     # "preparing"  → autó már be van dugva, RemoteStart után azonnal indul a töltés
     # "finishing"  → Volite-specifikus: ezt jelenti amikor autó csatlakoztatva van (de még nem tölt)
     # minden más státusz (charging, faulted, offline, stb.) → nem indítható
+    # FONTOS: compute_status() (nem a nyers cp.status), különben egy 2 percnél régebben
+    # látott, valójában offline töltőre is el lehetne indítani a fizetést egy régóta
+    # nyitva hagyott böngészőfülről.
     _startable = {"available", "preparing", "finishing"}
-    if (cp.status or "").lower() not in _startable:
+    status_now = compute_status(cp).lower()
+    if status_now not in _startable:
         raise HTTPException(
             status_code=409,
             detail={
                 "error": "charge_point_not_available",
-                "status": cp.status,
+                "status": status_now,
                 "startable_statuses": sorted(_startable),
             },
         )

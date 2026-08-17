@@ -282,14 +282,165 @@ function OverviewTab({ stats, sessions }) {
 
 // ── Chargers tab ──────────────────────────────────────────────────────────────
 
-function ChargersTab({ chargers, apiFetch, toast }) {
+const CONNECTOR_TYPES = ["Type 2", "CCS2", "CHAdeMO", "Type 1", "Schuko"];
+
+const MISSING_LABELS = {
+  location: "helyszín",
+  location_name: "helyszín neve",
+  coordinates: "koordináta",
+  connector_type: "csatlakozó típus",
+  max_power_kw: "teljesítmény",
+};
+
+function Field({ label, hint, children }) {
+  return (
+    <label className="block">
+      <div className="label mb-1">{label}</div>
+      {children}
+      {hint && <div className="text-xs text-ink-muted mt-1">{hint}</div>}
+    </label>
+  );
+}
+
+const INPUT_CLS =
+  "field";
+
+function ChargerConfigModal({ cp, busy, onClose, onSave }) {
+  const [form, setForm] = useState({
+    location_name: cp.location_name || "",
+    address_text: cp.address_text || "",
+    latitude: cp.latitude ?? "",
+    longitude: cp.longitude ?? "",
+    connector_type: cp.connector_type || "",
+    max_power_kw: cp.max_power_kw ?? "",
+  });
+
+  const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  function buildPatch() {
+    const num = (v) => (v === "" || v === null ? null : Number(v));
+    return {
+      location_name: form.location_name.trim(),
+      address_text: form.address_text.trim(),
+      latitude: num(form.latitude),
+      longitude: num(form.longitude),
+      connector_type: form.connector_type,
+      max_power_kw: num(form.max_power_kw),
+    };
+  }
+
+  const coordsBad =
+    (form.latitude !== "" && !Number.isFinite(Number(form.latitude))) ||
+    (form.longitude !== "" && !Number.isFinite(Number(form.longitude)));
+
+  return (
+    <div className="fixed inset-0 bg-ink/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white border border-brand-line rounded-2xl shadow-card max-w-lg w-full max-h-[90vh] flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-5 py-4 border-b border-brand-line flex items-center justify-between">
+          <div>
+            <div className="font-semibold text-ink">Töltő beállítása</div>
+            <div className="font-mono text-xs text-ink-soft">{cp.ocpp_id}</div>
+          </div>
+          <button onClick={onClose} className="text-ink-soft hover:text-ink text-xl leading-none">×</button>
+        </div>
+
+        <div className="overflow-auto p-5 space-y-4 flex-1">
+          {!cp.is_published && (cp.missing_fields || []).length > 0 && (
+            <div className="rounded-lg border border-brand-yellow/60 bg-brand-cream px-3 py-2 text-xs text-brand-amber">
+              Publikáláshoz hiányzik: {(cp.missing_fields || []).map(f => MISSING_LABELS[f] || f).join(", ")}
+            </div>
+          )}
+
+          <Field label="Helyszín neve" hint="Ez jelenik meg a térképen és a töltő kártyáján.">
+            <input className={INPUT_CLS} value={form.location_name} onChange={set("location_name")}
+                   placeholder="pl. Vörösmarty tér – bal oszlop" />
+          </Field>
+
+          <Field label="Cím" hint="Formátum: 1051 Budapest, Vörösmarty tér 1. – így az OCPI is helyesen bontja szét.">
+            <input className={INPUT_CLS} value={form.address_text} onChange={set("address_text")}
+                   placeholder="1051 Budapest, Vörösmarty tér 1." />
+          </Field>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Szélesség (lat)">
+              <input className={INPUT_CLS} value={form.latitude} onChange={set("latitude")}
+                     inputMode="decimal" placeholder="47.49790" />
+            </Field>
+            <Field label="Hosszúság (lng)">
+              <input className={INPUT_CLS} value={form.longitude} onChange={set("longitude")}
+                     inputMode="decimal" placeholder="19.04020" />
+            </Field>
+          </div>
+          <div className="text-xs text-ink-muted -mt-2">
+            Google Mapsen jobb klikk a pontra → a koordináta másolható. Töltőnként külön pontot adj meg,
+            különben a szomszédos oszlop markerével fedésbe kerül.
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Csatlakozó típusa">
+              <select className={INPUT_CLS} value={form.connector_type} onChange={set("connector_type")}>
+                <option value="">– válassz –</option>
+                {CONNECTOR_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </Field>
+            <Field label="Max teljesítmény (kW)">
+              <input className={INPUT_CLS} value={form.max_power_kw} onChange={set("max_power_kw")}
+                     inputMode="decimal" placeholder="22" />
+            </Field>
+          </div>
+          <div className="text-xs text-ink-muted -mt-2">
+            Ebből számol az OCPI AC/DC-t és amperszámot a roaming partnereknek – ha üresen marad,
+            a rendszer 22 kW-os Type 2-nek hirdetné meg.
+          </div>
+        </div>
+
+        <div className="px-5 py-4 border-t border-brand-line flex flex-wrap gap-2 justify-end">
+          <button
+            onClick={onClose}
+            className="rounded-lg border border-brand-line px-3 py-1.5 text-sm text-ink-soft hover:bg-brand-panel"
+          >
+            Mégse
+          </button>
+          <button
+            onClick={() => onSave(buildPatch())}
+            disabled={busy || coordsBad}
+            className="rounded-lg bg-brand-action px-3 py-1.5 text-sm text-white hover:bg-[#2451bd] disabled:opacity-40"
+          >
+            {busy ? "Mentés…" : "Mentés"}
+          </button>
+          {!cp.is_published && (
+            <button
+              onClick={() => onSave(buildPatch(), { publish: true })}
+              disabled={busy || coordsBad}
+              className="rounded-lg border border-emerald-700/50 bg-emerald-900/30 px-3 py-1.5 text-sm text-emerald-200 hover:bg-emerald-900/60 disabled:opacity-40"
+            >
+              {busy ? "Mentés…" : "Mentés és publikálás"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChargersTab({ chargers, apiFetch, toast, onRefresh }) {
   const [resetBusy, setResetBusy] = useState(null);
   const [configOpen, setConfigOpen] = useState(null);
   const [configData, setConfigData] = useState(null);
   const [configLoading, setConfigLoading] = useState(false);
   const [testBusy, setTestBusy] = useState(null);
+  const [editCp, setEditCp] = useState(null);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [publishBusy, setPublishBusy] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(null);
 
   const STARTABLE = ["available", "preparing", "finishing"];
+
+  const pending = chargers.filter(cp => !cp.is_published);
+  const live = chargers.filter(cp => cp.is_published);
 
   async function doTestCharge(cp) {
     const email = window.prompt(
@@ -347,9 +498,154 @@ function ChargersTab({ chargers, apiFetch, toast }) {
     }
   }
 
-  return (
-    <div>
-      <SectionHead>Töltők ({chargers.length})</SectionHead>
+  async function saveConfig(cp, patch, { publish = null } = {}) {
+    const body = { ...patch };
+    if (publish !== null) body.is_published = publish;
+    setSaveBusy(true);
+    try {
+      await apiFetch(`/api/admin/charge-points/${cp.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      toast(
+        publish === true ? `${cp.ocpp_id} publikálva – megjelent az éles appban`
+        : publish === false ? `${cp.ocpp_id} visszavonva az éles appból`
+        : `${cp.ocpp_id} beállításai mentve`,
+        "ok"
+      );
+      setEditCp(null);
+      onRefresh?.();
+      return true;
+    } catch (e) {
+      const d = e.detail;
+      const msg = d?.error === "incomplete_configuration"
+        ? `Hiányzó adat: ${(d.missing_fields || []).map(f => MISSING_LABELS[f] || f).join(", ")}`
+        : e.message;
+      toast(`Mentés hiba: ${msg}`, "err");
+      return false;
+    } finally {
+      setSaveBusy(false);
+    }
+  }
+
+  async function doTogglePublish(cp) {
+    if (cp.is_published && !window.confirm(
+      `${cp.ocpp_id} visszavonása: eltűnik az éles appból és az OCPI-ból. Biztos?`
+    )) return;
+    setPublishBusy(cp.id);
+    try {
+      await saveConfig(cp, {}, { publish: !cp.is_published });
+    } finally {
+      setPublishBusy(null);
+    }
+  }
+
+  async function doDelete(cp) {
+    if (!window.confirm(
+      `${cp.ocpp_id} törlése véglegesen. Csak előzmény nélküli (pl. elgépelt ID-val létrejött) töltőnél megy. Biztos?`
+    )) return;
+    setDeleteBusy(cp.id);
+    try {
+      await apiFetch(`/api/admin/charge-points/${cp.id}`, { method: "DELETE" });
+      toast(`${cp.ocpp_id} törölve`, "ok");
+      onRefresh?.();
+    } catch (e) {
+      const d = e.detail;
+      const msg = d?.error === "charge_point_has_history"
+        ? `Nem törölhető: ${d.sessions} session és ${d.intents} intent tartozik hozzá.`
+        : e.message;
+      toast(`Törlés hiba: ${msg}`, "err");
+    } finally {
+      setDeleteBusy(null);
+    }
+  }
+
+  function ChargerRow({ cp }) {
+    return (
+      <tr className="hover:bg-brand-panel">
+        <Td>{cp.id}</Td>
+        <Td><span className="font-mono text-xs text-ink">{cp.ocpp_id}</span></Td>
+        <Td><Badge status={cp.status} label={cp.status} /></Td>
+        <Td>
+          <div>{cp.location_name || <span className="text-brand-amber">nincs helyszín</span>}</div>
+          {cp.address_text && <div className="text-xs text-ink-muted">{cp.address_text}</div>}
+          {cp.latitude != null && cp.longitude != null && (
+            <div className="text-xs text-ink-muted font-mono">
+              {cp.latitude.toFixed(5)}, {cp.longitude.toFixed(5)}
+            </div>
+          )}
+        </Td>
+        <Td>{cp.connector_type || <span className="text-brand-amber">—</span>}</Td>
+        <Td>{cp.max_power_kw ? `${cp.max_power_kw} kW` : <span className="text-brand-amber">—</span>}</Td>
+        <Td>{[cp.vendor, cp.model].filter(Boolean).join(" ") || "—"}</Td>
+        <Td className="font-mono text-xs">{cp.firmware_version || "—"}</Td>
+        <Td className="font-mono text-xs">{cp.serial_number || "—"}</Td>
+        <Td className="whitespace-nowrap text-xs">{cp.last_seen_at ? `${timeAgo(cp.last_seen_at)} ezelőtt` : "—"}</Td>
+        <Td className="whitespace-nowrap text-xs">{fmtDate(cp.created_at)}</Td>
+        <Td>
+          <div className="flex gap-1.5 flex-wrap">
+            <ActionBtn
+              label="Beállítás" color="blue"
+              onClick={() => setEditCp(cp)}
+              title="Helyszín, koordináta, csatlakozó, teljesítmény"
+            />
+            {cp.is_published ? (
+              <ActionBtn
+                label="Visszavonás" color="amber"
+                busy={publishBusy === cp.id}
+                onClick={() => doTogglePublish(cp)}
+                title="Elrejtés az éles appból és az OCPI-ból"
+              />
+            ) : (
+              <ActionBtn
+                label="Publikálás" color="emerald"
+                busy={publishBusy === cp.id}
+                onClick={() => doTogglePublish(cp)}
+                title={cp.publishable ? "Megjelenítés az éles appban" : "Előbb töltsd ki a hiányzó adatokat"}
+              />
+            )}
+            {STARTABLE.includes(String(cp.status || "").toLowerCase()) && (
+              <ActionBtn
+                label="Teszt töltés" color="emerald"
+                busy={testBusy === cp.id}
+                onClick={() => doTestCharge(cp)}
+                title="Admin teszt töltés a teljes Stripe-folyamaton (5 Ft/kWh, ~200 Ft capture). Publikálás előtt is megy."
+              />
+            )}
+            <ActionBtn
+              label="Soft Reset" color="amber"
+              busy={resetBusy === cp.id}
+              onClick={() => doReset(cp, "Soft")}
+              title="OCPP Soft Reset küldése"
+            />
+            <ActionBtn
+              label="Hard Reset" color="rose"
+              busy={resetBusy === cp.id}
+              onClick={() => doReset(cp, "Hard")}
+              title="OCPP Hard Reset küldése"
+            />
+            <ActionBtn
+              label="GetConfig" color="blue"
+              onClick={() => doGetConfig(cp)}
+              title="OCPP GetConfiguration lekérdezés"
+            />
+            {!cp.is_published && (
+              <ActionBtn
+                label="Törlés" color="rose"
+                busy={deleteBusy === cp.id}
+                onClick={() => doDelete(cp)}
+                title="Téves/elgépelt ID-val létrejött sor törlése"
+              />
+            )}
+          </div>
+        </Td>
+      </tr>
+    );
+  }
+
+  function ChargerTable({ rows }) {
+    return (
       <div className="overflow-x-auto rounded-xl border border-brand-line">
         <table className="w-full">
           <thead className="bg-brand-panel">
@@ -360,56 +656,46 @@ function ChargersTab({ chargers, apiFetch, toast }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-brand-line">
-            {chargers.map(cp => (
-              <tr key={cp.id} className="hover:bg-brand-panel">
-                <Td>{cp.id}</Td>
-                <Td><span className="font-mono text-xs text-ink">{cp.ocpp_id}</span></Td>
-                <Td><Badge status={cp.status} label={cp.status} /></Td>
-                <Td>
-                  <div>{cp.location_name || "—"}</div>
-                  {cp.address_text && <div className="text-xs text-ink-muted">{cp.address_text}</div>}
-                </Td>
-                <Td>{cp.connector_type || "—"}</Td>
-                <Td>{cp.max_power_kw ? `${cp.max_power_kw} kW` : "—"}</Td>
-                <Td>{[cp.vendor, cp.model].filter(Boolean).join(" ") || "—"}</Td>
-                <Td className="font-mono text-xs">{cp.firmware_version || "—"}</Td>
-                <Td className="font-mono text-xs">{cp.serial_number || "—"}</Td>
-                <Td className="whitespace-nowrap text-xs">{cp.last_seen_at ? `${timeAgo(cp.last_seen_at)} ezelőtt` : "—"}</Td>
-                <Td className="whitespace-nowrap text-xs">{fmtDate(cp.created_at)}</Td>
-                <Td>
-                  <div className="flex gap-1.5 flex-wrap">
-                    {STARTABLE.includes(String(cp.status || "").toLowerCase()) && (
-                      <ActionBtn
-                        label="Teszt töltés" color="emerald"
-                        busy={testBusy === cp.id}
-                        onClick={() => doTestCharge(cp)}
-                        title="Admin teszt töltés a teljes Stripe-folyamaton (5 Ft/kWh, ~200 Ft capture)"
-                      />
-                    )}
-                    <ActionBtn
-                      label="Soft Reset" color="amber"
-                      busy={resetBusy === cp.id}
-                      onClick={() => doReset(cp, "Soft")}
-                      title="OCPP Soft Reset küldése"
-                    />
-                    <ActionBtn
-                      label="Hard Reset" color="rose"
-                      busy={resetBusy === cp.id}
-                      onClick={() => doReset(cp, "Hard")}
-                      title="OCPP Hard Reset küldése"
-                    />
-                    <ActionBtn
-                      label="GetConfig" color="blue"
-                      onClick={() => doGetConfig(cp)}
-                      title="OCPP GetConfiguration lekérdezés"
-                    />
-                  </div>
-                </Td>
-              </tr>
-            ))}
+            {rows.map(cp => <ChargerRow key={cp.id} cp={cp} />)}
           </tbody>
         </table>
       </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {pending.length > 0 && (
+        <div className="rounded-xl border border-brand-yellow/60 bg-brand-cream p-4">
+          <SectionHead>⚠ Konfigurálásra vár ({pending.length})</SectionHead>
+          <p className="text-xs text-ink-soft mb-3 max-w-3xl">
+            Ezek a töltők felcsatlakoztak, de <span className="text-brand-amber">még nem látszanak</span> az
+            éles appban és a roaming partnereknél. Add meg a helyszínt, a koordinátát, a csatlakozó típusát
+            és a teljesítményt, teszteld a „Teszt töltés" gombbal, majd publikáld.
+          </p>
+          <ChargerTable rows={pending} />
+        </div>
+      )}
+
+      <div>
+        <SectionHead>Éles töltők ({live.length})</SectionHead>
+        {live.length === 0 ? (
+          <div className="rounded-xl border border-brand-line p-4 text-sm text-ink-muted">
+            Nincs publikált töltő – az éles app üres térképet mutat.
+          </div>
+        ) : (
+          <ChargerTable rows={live} />
+        )}
+      </div>
+
+      {editCp && (
+        <ChargerConfigModal
+          cp={editCp}
+          busy={saveBusy}
+          onClose={() => setEditCp(null)}
+          onSave={(patch, opts) => saveConfig(editCp, patch, opts)}
+        />
+      )}
 
       {/* GetConfig modal */}
       {configOpen && (
@@ -1103,7 +1389,10 @@ export default function AdminPage() {
       const msg = typeof data?.detail === "string"
         ? data.detail
         : data?.detail?.hint || data?.detail?.error || data?.error || `HTTP ${res.status}`;
-      throw new Error(msg);
+      const err = new Error(msg);
+      err.detail = data?.detail;   // strukturált hiba (pl. missing_fields) a hívónak
+      err.status = res.status;
+      throw err;
     }
     return data;
   }, [token]);
@@ -1212,7 +1501,9 @@ export default function AdminPage() {
       {/* Content */}
       <div className="mx-auto max-w-screen-2xl px-6 py-6">
         {tab === "overview" && <OverviewTab stats={stats} sessions={sessions} />}
-        {tab === "chargers" && <ChargersTab chargers={chargers} apiFetch={apiFetch} toast={toast} />}
+        {tab === "chargers" && (
+          <ChargersTab chargers={chargers} apiFetch={apiFetch} toast={toast} onRefresh={refresh} />
+        )}
         {tab === "sessions" && (
           <SessionsTab
             sessions={sessions} chargers={chargers} apiFetch={apiFetch} toast={toast} onRefresh={refresh}

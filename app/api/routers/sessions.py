@@ -6,12 +6,14 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.security import HTTPBasicCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_db
+from app.api.routers.admin import verify_admin
 from app.db.models import ChargePoint, ChargeSession, MeterSample
 from app.ocpp.ocpp_ws import remote_start_transaction, remote_stop_transaction
 from app.ocpp.ocpp_utils import MIN_CHARGE_HUF, _price_huf_per_kwh
@@ -251,7 +253,13 @@ async def get_session_by_intent(
 async def start_session(
     body: StartSessionIn,
     db: AsyncSession = Depends(get_db),
+    _: HTTPBasicCredentials = Depends(verify_admin),
 ):
+    """Fizetés nélküli RemoteStart – admin only.
+
+    Korábban hitelesítés nélkül volt elérhető, vagyis bárki ingyen töltést
+    indíthatott bármelyik töltőn. A publikus flow a /api/intents/ (Stripe).
+    """
     cp = await _get_cp_by_id(db, body.charge_point_id)
 
     existing = await _get_active_session(db, charge_point_id=cp.id, connector_id=body.connector_id)
@@ -291,8 +299,9 @@ async def start_session(
 async def stop_session(
     body: StopSessionIn,
     db: AsyncSession = Depends(get_db),
+    _: HTTPBasicCredentials = Depends(verify_admin),
 ):
-    """Belső / admin stop – stop_code nélkül."""
+    """Belső / admin stop – stop_code nélkül. Az ügyfél a /{session_id}/stop-ot hívja."""
     res = await db.execute(
         select(ChargeSession)
         .options(selectinload(ChargeSession.charge_point))

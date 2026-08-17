@@ -77,6 +77,12 @@ class ChargePoint(Base):
     status = Column(String(32), nullable=False, default="available")
     last_seen_at = Column(DateTime(timezone=True), nullable=True)
 
+    # Egy BootNotificationből felbukkanó töltő publikálatlan: a publikus API, a
+    # fizetés-indítás és az OCPI is kihagyja, amíg admin be nem konfigurálta.
+    is_published = Column(
+        Boolean, nullable=False, default=False, server_default="false", index=True
+    )
+
     # OCPI EVSE identity. uid is stable (backfilled from ocpp_id); evse_id
     # (HU*ENF*E<id>) is derived in app/ocpi/ids.py.
     ocpi_evse_uid = Column(String(48), nullable=True)

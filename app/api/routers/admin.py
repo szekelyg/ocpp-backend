@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_db
-from app.db.models import ChargePoint, ChargeSession, ChargingIntent
+from app.db.models import ChargePoint, ChargeSession, ChargingIntent, Location
 from app.api.routers.charge_points import compute_status
 
 logger = logging.getLogger("admin")
@@ -138,10 +138,32 @@ def _intent_dict(i: ChargingIntent) -> dict:
     }
 
 
+def _cp_missing_fields(cp: ChargePoint) -> list[str]:
+    """Mi hiányzik ahhoz, hogy a töltő publikálható legyen."""
+    missing = []
+    if cp.location_id is None or cp.location is None:
+        missing.append("location")
+    else:
+        if not (cp.location.name or "").strip():
+            missing.append("location_name")
+        if cp.location.latitude is None or cp.location.longitude is None:
+            missing.append("coordinates")
+    if not (cp.connector_type or "").strip():
+        missing.append("connector_type")
+    if cp.max_power_kw is None or float(cp.max_power_kw) <= 0:
+        missing.append("max_power_kw")
+    return missing
+
+
 def _cp_dict_admin(cp: ChargePoint) -> dict:
+    missing = _cp_missing_fields(cp)
     return {
         "id": cp.id,
         "ocpp_id": cp.ocpp_id,
+        "is_published": bool(cp.is_published),
+        "location_id": cp.location_id,
+        "missing_fields": missing,
+        "publishable": not missing,
         "model": cp.model,
         "vendor": cp.vendor,
         "firmware_version": cp.firmware_version,
@@ -255,6 +277,161 @@ async def admin_list_charge_points(
         select(ChargePoint).options(selectinload(ChargePoint.location))
     )
     return [_cp_dict_admin(cp) for cp in res.scalars().all()]
+
+
+class ChargePointConfigIn(BaseModel):
+    """Töltő beállítása. Csak a megadott mezők módosulnak (részleges frissítés)."""
+    location_name: Optional[str] = None
+    address_text: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    connector_type: Optional[str] = None
+    max_power_kw: Optional[float] = None
+    is_published: Optional[bool] = None
+
+
+_LOCATION_FIELDS = ("location_name", "address_text", "latitude", "longitude")
+
+
+async def _location_for_cp(db: AsyncSession, cp: ChargePoint) -> Location:
+    """A töltő saját Location sora, létrehozva ha még nincs.
+
+    Ha a meglévő Location-t másik töltő is használja, NEM írjuk felül – ilyenkor
+    külön sort kap ez a töltő, hogy egy koordináta-módosítás ne mozdítsa el a
+    szomszédos oszlop töltőjét is.
+    """
+    if cp.location_id is not None:
+        shared = (await db.execute(
+            select(func.count()).select_from(ChargePoint).where(
+                ChargePoint.location_id == cp.location_id,
+                ChargePoint.id != cp.id,
+            )
+        )).scalar_one()
+        if shared == 0:
+            loc = (await db.execute(
+                select(Location).where(Location.id == cp.location_id)
+            )).scalar_one_or_none()
+            if loc is not None:
+                return loc
+
+    loc = Location(name=cp.ocpp_id, address_text=None)
+    db.add(loc)
+    await db.flush()
+    cp.location_id = loc.id
+    return loc
+
+
+@router.put("/charge-points/{cp_id}")
+async def admin_configure_charge_point(
+    cp_id: int,
+    body: ChargePointConfigIn,
+    db: AsyncSession = Depends(get_db),
+    _: HTTPBasicCredentials = Depends(verify_admin),
+):
+    """Töltő beállítása és publikálása.
+
+    Publikálni csak hiánytalan adatokkal lehet (helyszín név + koordináta,
+    csatlakozó típus, teljesítmény) – enélkül a töltő az éles appban rossz vagy
+    hiányos adatokkal jelenne meg, az OCPI pedig alapértelmezett Type2/AC-ként
+    hirdetné meg a roaming partnereknek.
+    """
+    res = await db.execute(
+        select(ChargePoint).options(selectinload(ChargePoint.location)).where(ChargePoint.id == cp_id)
+    )
+    cp = res.scalar_one_or_none()
+    if not cp:
+        raise HTTPException(status_code=404, detail="ChargePoint not found")
+
+    data = body.model_dump(exclude_unset=True)
+
+    if any(f in data for f in _LOCATION_FIELDS):
+        loc = await _location_for_cp(db, cp)
+        if "location_name" in data:
+            name = (data["location_name"] or "").strip()
+            if not name:
+                raise HTTPException(status_code=422, detail={"error": "location_name_empty"})
+            loc.name = name
+        if "address_text" in data:
+            loc.address_text = (data["address_text"] or "").strip() or None
+        if "latitude" in data:
+            loc.latitude = data["latitude"]
+        if "longitude" in data:
+            loc.longitude = data["longitude"]
+        loc.ocpi_last_updated = _utcnow()
+
+    if "connector_type" in data:
+        cp.connector_type = (data["connector_type"] or "").strip() or None
+    if "max_power_kw" in data:
+        cp.max_power_kw = data["max_power_kw"]
+
+    # A publikálási döntés előtt a fenti módosításokat látnia kell az ellenőrzésnek.
+    await db.flush()
+    await db.refresh(cp, attribute_names=["location"])
+
+    if "is_published" in data:
+        want = bool(data["is_published"])
+        if want:
+            missing = _cp_missing_fields(cp)
+            if missing:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"error": "incomplete_configuration", "missing_fields": missing},
+                )
+        cp.is_published = want
+
+    cp.ocpi_last_updated = _utcnow()
+    await db.commit()
+    await db.refresh(cp, attribute_names=["location"])
+
+    # A roaming partnerek is értesüljenek az új/megszűnt EVSE-ről (best-effort).
+    if cp.location_id is not None:
+        from app.ocpi.services.push_service import schedule_push_location
+        schedule_push_location(cp.location_id)
+
+    logger.info(
+        "admin_configure_charge_point cp_id=%s ocpp_id=%s published=%s fields=%s",
+        cp.id, cp.ocpp_id, cp.is_published, sorted(data.keys()),
+    )
+    return _cp_dict_admin(cp)
+
+
+@router.delete("/charge-points/{cp_id}")
+async def admin_delete_charge_point(
+    cp_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: HTTPBasicCredentials = Depends(verify_admin),
+):
+    """Téves töltő-sor törlése (pl. elgépelt ChargeBox ID miatt keletkezett).
+
+    Csak akkor törölhető, ha nincs hozzá session és intent – így egy éles töltő
+    előzményei nem tűnhetnek el véletlenül.
+    """
+    res = await db.execute(select(ChargePoint).where(ChargePoint.id == cp_id))
+    cp = res.scalar_one_or_none()
+    if not cp:
+        raise HTTPException(status_code=404, detail="ChargePoint not found")
+
+    session_count = (await db.execute(
+        select(func.count()).select_from(ChargeSession).where(ChargeSession.charge_point_id == cp_id)
+    )).scalar_one()
+    intent_count = (await db.execute(
+        select(func.count()).select_from(ChargingIntent).where(ChargingIntent.charge_point_id == cp_id)
+    )).scalar_one()
+    if session_count or intent_count:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "charge_point_has_history",
+                "sessions": int(session_count),
+                "intents": int(intent_count),
+            },
+        )
+
+    ocpp_id = cp.ocpp_id
+    await db.delete(cp)
+    await db.commit()
+    logger.warning("admin_delete_charge_point cp_id=%s ocpp_id=%s", cp_id, ocpp_id)
+    return {"ok": True, "deleted_id": cp_id, "ocpp_id": ocpp_id}
 
 
 @router.post("/charge-points/{cp_id}/reset")

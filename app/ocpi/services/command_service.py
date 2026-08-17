@@ -56,7 +56,10 @@ async def _find_cp(db: AsyncSession, location_id: str, evse_uid: Optional[str]) 
     pk = ids.parse_location_id(location_id)
     if pk is None:
         return None
-    q = select(ChargePoint).where(ChargePoint.location_id == pk)
+    # Publikálatlan (konfigurálásra váró) töltőre roaming parancs sem futhat.
+    q = select(ChargePoint).where(
+        ChargePoint.location_id == pk, ChargePoint.is_published.is_(True)
+    )
     rows = (await db.execute(q)).scalars().all()
     if not rows:
         return None
