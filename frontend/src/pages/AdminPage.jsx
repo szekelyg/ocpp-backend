@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { getCurrentPosition, ACCURACY_WARN_M } from "../utils/geolocate";
 
 const REFRESH_MS = 15_000;
 
@@ -317,6 +318,30 @@ function ChargerConfigModal({ cp, busy, onClose, onSave }) {
 
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
 
+  // Telepítéskor a szerelő a töltő mellett áll a telefonjával – innen a koordináta.
+  const [geoBusy, setGeoBusy] = useState(false);
+  const [geoErr, setGeoErr] = useState("");
+  const [geoAccuracy, setGeoAccuracy] = useState(null);
+
+  async function fillFromPhone() {
+    setGeoBusy(true);
+    setGeoErr("");
+    setGeoAccuracy(null);
+    try {
+      const pos = await getCurrentPosition();
+      setForm(f => ({
+        ...f,
+        latitude: pos.latitude.toFixed(6),
+        longitude: pos.longitude.toFixed(6),
+      }));
+      setGeoAccuracy(pos.accuracy);
+    } catch (e) {
+      setGeoErr(e.message);
+    } finally {
+      setGeoBusy(false);
+    }
+  }
+
   function buildPatch() {
     const num = (v) => (v === "" || v === null ? null : Number(v));
     return {
@@ -374,9 +399,42 @@ function ChargerConfigModal({ cp, busy, onClose, onSave }) {
                      inputMode="decimal" placeholder="19.04020" />
             </Field>
           </div>
-          <div className="text-xs text-ink-muted -mt-2">
-            Google Mapsen jobb klikk a pontra → a koordináta másolható. Töltőnként külön pontot adj meg,
-            különben a szomszédos oszlop markerével fedésbe kerül.
+          <div className="-mt-2 space-y-2">
+            <button
+              type="button"
+              onClick={fillFromPhone}
+              disabled={geoBusy}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-brand-action bg-brand-action/5 px-3 py-2.5 text-sm font-semibold text-brand-action hover:bg-brand-action/10 disabled:opacity-60 transition"
+            >
+              <span className="text-base leading-none">{geoBusy ? "⏳" : "📍"}</span>
+              {geoBusy ? "Helymeghatározás…" : "Kitöltés a telefon helyzetéből"}
+            </button>
+
+            {geoErr && (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                {geoErr}
+              </div>
+            )}
+
+            {geoAccuracy != null && (
+              geoAccuracy > ACCURACY_WARN_M ? (
+                <div className="hint">
+                  Beolvasva, de a pontosság csak <span className="font-bold">±{Math.round(geoAccuracy)} m</span> —
+                  ennyi hibával a marker a szomszéd utcába is eshet. Menj ki a szabad égbolt alá, és mérj újra,
+                  vagy írd be kézzel a koordinátát.
+                </div>
+              ) : (
+                <div className="rounded-xl bg-[#e6faf4] px-3 py-2 text-xs text-[#037a5c]">
+                  Beolvasva, pontosság ±{Math.round(geoAccuracy)} m. Mentés előtt érdemes ránézni a térképen.
+                </div>
+              )
+            )}
+
+            <div className="text-xs text-ink-muted">
+              A telefon helyzete a töltő mellett állva a legpontosabb. Kézzel is megadható: Google Mapsen jobb
+              klikk a pontra → a koordináta másolható. Töltőnként külön pontot adj meg, különben a szomszédos
+              oszlop markerével fedésbe kerül.
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
