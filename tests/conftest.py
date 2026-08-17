@@ -11,7 +11,7 @@ os.environ.setdefault("OCPI_TOKEN_A", "test-token-a")
 os.environ.setdefault("OCPI_BASE_URL", "https://cpo.test")
 os.environ.setdefault("OCPI_COUNTRY_CODE", "HU")
 os.environ.setdefault("OCPI_PARTY_ID", "ENF")
-os.environ.setdefault("OCPI_BUSINESS_NAME", "Energiafelhő")
+os.environ.setdefault("OCPI_BUSINESS_NAME", "Energiafelhő Kft.")
 os.environ.setdefault("OCPP_PRICE_HUF_PER_KWH", "170")
 os.environ.setdefault("STRIPE_MIN_HUF", "500")
 

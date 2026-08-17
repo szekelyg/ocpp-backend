@@ -80,6 +80,27 @@ def _pick_measurand_sum(
     return total if found else None
 
 
+def _pick_measurand_phases(sampled_values: Any, measurand: str) -> Optional[dict]:
+    """Egy measurand fázisonkénti értékei: {"L1": .., "L2": .., "L3": ..}.
+
+    Csak a ténylegesen jelenlévő fázisokat adja vissza. None, ha a töltő nem
+    küld fázisbontást ehhez a measurand-hoz.
+    """
+    if not isinstance(sampled_values, list):
+        return None
+    out: dict = {}
+    for sv in sampled_values:
+        if not isinstance(sv, dict) or sv.get("measurand") != measurand:
+            continue
+        ph = sv.get("phase")
+        if not ph:
+            continue
+        val = _as_float(sv.get("value"))
+        if val is not None:
+            out[str(ph)] = val
+    return out or None
+
+
 def _price_huf_per_kwh() -> Optional[float]:
     v = os.environ.get("OCPP_PRICE_HUF_PER_KWH")
     if not v:

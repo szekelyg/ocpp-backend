@@ -51,6 +51,10 @@ class CreateIntentIn(BaseModel):
     billing_company: str | None = Field(None, max_length=255)
     billing_tax_number: str | None = Field(None, max_length=64)
 
+    # "Adataim mentése legközelebbre" pipa – a számlázási profilt emailhez kötve
+    # elmentjük, hogy visszatérő belépéskor automatikusan kitöltődjön. Kártyaadat SOHA.
+    save_profile: bool = False
+
 
 @router.post("/", response_model=dict)
 async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)):
@@ -95,6 +99,27 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
         billing_tax_number=body.billing_tax_number if body.billing_type == "business" else None,
     )
     db.add(intent)
+
+    # Opcionális: számlázási profil mentése a visszatérő belépéshez (email OTP-vel érhető el).
+    # Kártyaadat SOHA nem kerül ide – az mindig a Stripe-nál marad.
+    if body.save_profile:
+        from app.api.routers.auth import upsert_user_profile
+
+        await upsert_user_profile(
+            db,
+            email=str(body.email),
+            fields={
+                "billing_type": body.billing_type,
+                "billing_name": body.billing_name,
+                "billing_street": body.billing_street,
+                "billing_zip": body.billing_zip,
+                "billing_city": body.billing_city,
+                "billing_country": body.billing_country,
+                "billing_company": body.billing_company if body.billing_type == "business" else None,
+                "billing_tax_number": body.billing_tax_number if body.billing_type == "business" else None,
+            },
+        )
+
     await db.commit()
     await db.refresh(intent)
 

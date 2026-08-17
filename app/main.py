@@ -16,6 +16,7 @@ from app.api.routers.sessions import router as sessions_router
 from app.api.routers.payments_stripe import router as payments_stripe_router
 from app.api.routers.intents import router as intents_router
 from app.api.routers.admin import router as admin_router
+from app.api.routers.auth import router as auth_router
 from app.ocpi.router import router as ocpi_router
 from app.ocpi.errors import add_ocpi_exception_handlers
 from app.ocpp.ocpp_ws import handle_ocpp
@@ -265,6 +266,7 @@ app.include_router(sessions_router, prefix="/api")
 app.include_router(payments_stripe_router, prefix="/api")
 app.include_router(intents_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
 
 # OCPI 2.2.1 (CPO role) – own "/ocpi" prefix, sibling of "/api"
 app.include_router(ocpi_router)

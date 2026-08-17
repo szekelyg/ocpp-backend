@@ -4,10 +4,10 @@
 
 @layer base {
   html, body, #root { height: 100%; }
-  body { @apply bg-slate-950 text-slate-100; }
+  body { @apply bg-brand-bg text-ink antialiased; }
 }
 
-/* --- Design System (B) --- */
+/* --- Design System – Energiafelhő matrica-arculat (világos) --- */
 @layer components {
   /* layout */
   .page { @apply min-h-screen; }
@@ -15,33 +15,37 @@
   .stack { @apply space-y-6; }
 
   .headerRow { @apply flex flex-col gap-4 md:flex-row md:items-center md:justify-between; }
-  .title { @apply text-3xl font-semibold tracking-tight; }
-  .subtitle { @apply text-sm text-slate-400; }
+  .title { @apply text-3xl font-bold tracking-tight text-ink; }
+  .subtitle { @apply text-sm text-ink-soft; }
 
-  .pill { @apply text-sm bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl; }
+  /* kis-kapitális címke, mint a matricán ("A TÖLTÉS MENETE") */
+  .kicker { @apply text-[11px] font-bold uppercase tracking-[0.18em] text-ink-muted; }
+
+  .pill { @apply text-sm bg-white border border-brand-line px-3 py-1.5 rounded-xl; }
 
   .grid3 { @apply grid grid-cols-1 xl:grid-cols-3 gap-6; }
   .col2 { @apply xl:col-span-2; }
   .rightCol { @apply space-y-6; }
 
   /* cards */
-  .card { @apply bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden; }
-  .cardHeader { @apply px-5 py-4 border-b border-slate-800; }
-  .cardTitle { @apply font-medium; }
-  .cardSub { @apply text-xs text-slate-400; }
+  .card { @apply bg-white border border-brand-line rounded-2xl shadow-card overflow-hidden; }
+  .cardHeader { @apply px-5 py-4 border-b border-brand-line; }
+  .cardTitle { @apply font-semibold text-ink; }
+  .cardSub { @apply text-xs text-ink-muted; }
   .cardBody { @apply p-5; }
 
   /* buttons */
-  .btn { @apply inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-medium border transition
-               border-slate-700 bg-slate-800 text-slate-100 hover:bg-slate-700
-               focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-60 disabled:cursor-not-allowed; }
-  .btnPrimary { @apply border-blue-500/50 bg-blue-600 hover:bg-blue-500; }
-  .btnGhost { @apply bg-transparent border-slate-700 hover:bg-slate-900; }
+  .btn { @apply inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold border transition
+               border-brand-line bg-white text-ink hover:bg-brand-panel
+               focus:outline-none focus:ring-2 focus:ring-brand-action/30 disabled:opacity-60 disabled:cursor-not-allowed; }
+  .btnPrimary { @apply border-brand-action bg-brand-action text-white hover:bg-[#2451bd] hover:border-[#2451bd]; }
+  .btnGhost { @apply bg-transparent border-brand-line text-ink-soft hover:bg-brand-panel hover:text-ink; }
 
   /* form */
-  .field { @apply w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-slate-100
-                 outline-none transition focus:ring-2 focus:ring-blue-500/40; }
-  .label { @apply text-xs font-medium text-slate-400; }
+  .field { @apply w-full rounded-xl border border-brand-line bg-white px-4 py-2.5 text-sm text-ink
+                 placeholder:text-ink-muted outline-none transition
+                 focus:border-brand-action/50 focus:ring-2 focus:ring-brand-action/20 disabled:opacity-50; }
+  .label { @apply text-xs font-medium text-ink-soft; }
 
   .toolbar { @apply space-y-3; }
   .toolbarRow { @apply flex flex-col gap-2 sm:flex-row sm:items-center; }
@@ -51,35 +55,48 @@
   /* list */
   .list { @apply flex flex-col gap-3; }
   .listItem { @apply w-full text-left rounded-xl border p-4 transition
-                    bg-slate-950/30 border-slate-800 hover:bg-slate-900/60 hover:border-slate-700
-                    focus:outline-none focus:ring-2 focus:ring-blue-500/40; }
-  .listItemSelected { @apply ring-2 ring-blue-500/30 border-blue-500/40; }
+                    bg-white border-brand-line hover:border-brand-blue/60 hover:shadow-card
+                    focus:outline-none focus:ring-2 focus:ring-brand-action/30; }
+  .listItemSelected { @apply ring-2 ring-brand-action/25 border-brand-action/50; }
   .listItemTop { @apply flex items-start justify-between gap-3; }
-  .listItemTitle { @apply text-sm font-semibold text-slate-100; }
-  .listItemMeta { @apply mt-2 text-sm text-slate-300 leading-snug; }
-  .listItemMeta2 { @apply text-slate-400; }
-  .listItemFoot { @apply mt-3 text-xs text-slate-400; }
+  .listItemTitle { @apply text-sm font-semibold text-ink; }
+  .listItemMeta { @apply mt-2 text-sm text-ink-soft leading-snug; }
+  .listItemMeta2 { @apply text-ink-muted; }
+  .listItemFoot { @apply mt-3 text-xs text-ink-muted; }
 
   /* selected details */
   .detailGrid { @apply grid grid-cols-3 gap-x-4 gap-y-3 text-sm; }
-  .detailKey { @apply text-slate-400; }
-  .detailValStrong { @apply col-span-2 font-semibold text-slate-100; }
-  .detailVal { @apply col-span-2 text-slate-300; }
-  .hint { @apply rounded-xl border border-slate-800 bg-slate-950/30 p-3 text-xs text-slate-400; }
+  .detailKey { @apply text-ink-muted; }
+  .detailValStrong { @apply col-span-2 font-semibold text-ink; }
+  .detailVal { @apply col-span-2 text-ink-soft; }
+  /* krém tájékoztató pill, mint a matricán */
+  .hint { @apply rounded-xl bg-brand-cream p-3 text-xs text-brand-amber; }
   .actions { @apply flex flex-col gap-2 sm:flex-row; }
+
+  /* chip – csatlakozó / teljesítmény címkék */
+  .chip { @apply inline-flex items-center gap-1 rounded-lg bg-brand-panel border border-brand-line px-2.5 py-1 text-xs text-ink-soft; }
 
   /* map */
   .mapFrame { @apply h-[520px] w-full; }
-  .leaflet-container { height: 100%; width: 100%; background: #0b1220; }
+  .leaflet-container { height: 100%; width: 100%; background: #e9eefb; }
 
-  /* badges */
-  .badge { @apply inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border; }
-  .badgeGood { @apply bg-emerald-900/40 text-emerald-300 border-emerald-700; }
-  .badgeOk { @apply bg-sky-900/40 text-sky-300 border-sky-700; }
-  .badgeWarn { @apply bg-amber-900/40 text-amber-300 border-amber-700; }
-  .badgeBad { @apply bg-rose-900/40 text-rose-300 border-rose-700; }
-  .badgeMuted { @apply bg-slate-800 text-slate-400 border-slate-700; }
+  /* badges – pasztell tónusok */
+  .badge { @apply inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border; }
+  .badgeGood { @apply bg-[#e6faf4] text-[#037a5c] border-[#04cd99]/40; }
+  .badgeOk { @apply bg-[#eef3ff] text-brand-action border-brand-blue/40; }
+  .badgeWarn { @apply bg-brand-cream text-brand-amber border-brand-yellow/60; }
+  .badgeBad { @apply bg-rose-50 text-rose-600 border-rose-300; }
+  .badgeMuted { @apply bg-slate-100 text-slate-500 border-slate-200; }
 
   /* banners */
-  .errorBanner { @apply rounded-2xl border border-red-900/50 bg-red-950/40 px-4 py-3 text-sm text-red-200; }
+  .errorBanner { @apply rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700; }
+
+  /* a matrica sárga→kék→zöld átmenetes vonala */
+  .accentLine { @apply h-1 w-full bg-gradient-to-r from-brand-yellow via-brand-blue to-brand-green; }
+
+  /* számozott lépés-körök, mint a matricán */
+  .stepDot { @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white; }
+  .stepDot1 { @apply bg-brand-yellow; }
+  .stepDot2 { @apply bg-brand-blue; }
+  .stepDot3 { @apply bg-brand-green; }
 }

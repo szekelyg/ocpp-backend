@@ -13,18 +13,18 @@ const HATALYOS = "2026. június 4.";
 function Section({ id, n, title, children }) {
   return (
     <section id={id} className="space-y-2 scroll-mt-20">
-      <h2 className="text-lg font-semibold text-slate-100">
+      <h2 className="text-lg font-semibold text-ink">
         {n}. {title}
       </h2>
-      <div className="space-y-2 text-sm text-slate-300 leading-relaxed">{children}</div>
+      <div className="space-y-2 text-sm text-ink-soft leading-relaxed">{children}</div>
     </section>
   );
 }
 
 function Sub({ n, children }) {
   return (
-    <p className="text-sm text-slate-300 leading-relaxed">
-      <span className="text-slate-500 font-mono mr-2">{n}</span>
+    <p className="text-sm text-ink-soft leading-relaxed">
+      <span className="text-ink-muted font-mono mr-2">{n}</span>
       {children}
     </p>
   );
@@ -32,7 +32,7 @@ function Sub({ n, children }) {
 
 export default function Aszf() {
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+    <div className="min-h-screen flex flex-col">
       <AppHeader />
 
       <main className="mx-auto max-w-3xl w-full px-6 py-8 flex-1 space-y-7">
@@ -40,25 +40,25 @@ export default function Aszf() {
           <h1 className="text-2xl font-semibold tracking-tight">
             Általános Szerződési Feltételek (ÁSZF)
           </h1>
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-ink-soft">
             Elektromos járművek töltési szolgáltatása
           </p>
-          <p className="text-sm text-slate-500">Hatályos: {HATALYOS}</p>
+          <p className="text-sm text-ink-muted">Hatályos: {HATALYOS}</p>
         </div>
 
         <Section n="1" title="Fogalmak">
           <p>A jelen ÁSZF-ben a nagy kezdőbetűvel írt kifejezések az alábbi jelentéssel bírnak:</p>
           <ul className="space-y-1.5">
-            <li><span className="text-slate-100">„Szolgáltató"</span>: az Energiafelhő Kft., amely a Szolgáltatást nyújtja.</li>
-            <li><span className="text-slate-100">„Szolgáltatás"</span>: a Szolgáltató által üzemeltetett elektromos töltőállomásokon keresztül nyújtott elektromobilitás (járműtöltési) szolgáltatás és az ahhoz kapcsolódó kiegészítő szolgáltatások.</li>
-            <li><span className="text-slate-100">„Weboldal"</span>: a Szolgáltatás igénybevételére és elszámolására szolgáló online felület, amely a <span className="text-slate-100">https://ev.energiafelho.hu</span> címen érhető el.</li>
-            <li><span className="text-slate-100">„Ügyfél"</span>: az a természetes vagy jogi személy, illetve jogi személyiséggel nem rendelkező szervezet, aki/amely a Szolgáltatást igénybe veszi.</li>
-            <li><span className="text-slate-100">„Töltőállomás"</span>: a Szolgáltató által üzemeltetett nyilvános elektromos töltőberendezés, amely a jármű villamosenergia-tárolójának töltését biztosítja.</li>
-            <li><span className="text-slate-100">„Termék"</span>: a jármű meghajtásához szükséges villamos energia.</li>
-            <li><span className="text-slate-100">„Díj"</span>: a Szolgáltatásért az Ügyfél által fizetendő ellenérték.</li>
-            <li><span className="text-slate-100">„Díjszabás"</span>: a Szolgáltató által a Weboldalon és/vagy a Töltőállomáson közzétett, mindenkor hatályos egységárak.</li>
-            <li><span className="text-slate-100">„Zárolás"</span>: a fizetés megkezdésekor az Ügyfél bankkártyáján rögzített összeg (authorizáció), amely még nem tényleges terhelés.</li>
-            <li><span className="text-slate-100">„Vis Maior"</span>: a Felek által előre nem látható, elháríthatatlan külső körülmény (pl. természeti katasztrófa, járvány, háború, áramszolgáltatói kimaradás), amely a teljesítést akadályozza.</li>
+            <li><span className="text-ink">„Szolgáltató"</span>: az Energiafelhő Kft., amely a Szolgáltatást nyújtja.</li>
+            <li><span className="text-ink">„Szolgáltatás"</span>: a Szolgáltató által üzemeltetett elektromos töltőállomásokon keresztül nyújtott elektromobilitás (járműtöltési) szolgáltatás és az ahhoz kapcsolódó kiegészítő szolgáltatások.</li>
+            <li><span className="text-ink">„Weboldal"</span>: a Szolgáltatás igénybevételére és elszámolására szolgáló online felület, amely a <span className="text-ink">https://ev.energiafelho.hu</span> címen érhető el.</li>
+            <li><span className="text-ink">„Ügyfél"</span>: az a természetes vagy jogi személy, illetve jogi személyiséggel nem rendelkező szervezet, aki/amely a Szolgáltatást igénybe veszi.</li>
+            <li><span className="text-ink">„Töltőállomás"</span>: a Szolgáltató által üzemeltetett nyilvános elektromos töltőberendezés, amely a jármű villamosenergia-tárolójának töltését biztosítja.</li>
+            <li><span className="text-ink">„Termék"</span>: a jármű meghajtásához szükséges villamos energia.</li>
+            <li><span className="text-ink">„Díj"</span>: a Szolgáltatásért az Ügyfél által fizetendő ellenérték.</li>
+            <li><span className="text-ink">„Díjszabás"</span>: a Szolgáltató által a Weboldalon és/vagy a Töltőállomáson közzétett, mindenkor hatályos egységárak.</li>
+            <li><span className="text-ink">„Zárolás"</span>: a fizetés megkezdésekor az Ügyfél bankkártyáján rögzített összeg (authorizáció), amely még nem tényleges terhelés.</li>
+            <li><span className="text-ink">„Vis Maior"</span>: a Felek által előre nem látható, elháríthatatlan külső körülmény (pl. természeti katasztrófa, járvány, háború, áramszolgáltatói kimaradás), amely a teljesítést akadályozza.</li>
           </ul>
         </Section>
 
@@ -87,12 +87,12 @@ export default function Aszf() {
 
         <Section n="3" title="A Szolgáltató adatai">
           <ul className="space-y-1">
-            <li>Cégnév: <span className="text-slate-100">Energiafelhő Kft.</span> (Energiafelhő Korlátolt Felelősségű Társaság)</li>
-            <li>Székhely: <span className="text-slate-100">1147 Budapest, Ilosvai Selymes utca 127. fszt. 2.</span></li>
-            <li>Cégjegyzékszám: <span className="text-slate-100">01-09-953931</span></li>
-            <li>Adószám: <span className="text-slate-100">23120635-2-42</span></li>
-            <li>E-mail: <a className="text-blue-400" href="mailto:szerviz@energiafelho.hu">szerviz@energiafelho.hu</a></li>
-            <li>Tárhelyszolgáltató: <span className="text-slate-100">Cloudflare, Inc.</span> (101 Townsend Street, San Francisco, CA 94107, USA)</li>
+            <li>Cégnév: <span className="text-ink">Energiafelhő Kft.</span> (Energiafelhő Korlátolt Felelősségű Társaság)</li>
+            <li>Székhely: <span className="text-ink">1147 Budapest, Ilosvai Selymes utca 127. fszt. 2.</span></li>
+            <li>Cégjegyzékszám: <span className="text-ink">01-09-953931</span></li>
+            <li>Adószám: <span className="text-ink">23120635-2-42</span></li>
+            <li>E-mail: <a className="text-brand-action hover:underline" href="mailto:szerviz@energiafelho.hu">szerviz@energiafelho.hu</a></li>
+            <li>Tárhelyszolgáltató: <span className="text-ink">Cloudflare, Inc.</span> (101 Townsend Street, San Francisco, CA 94107, USA)</li>
           </ul>
         </Section>
 
@@ -153,7 +153,7 @@ export default function Aszf() {
             számlavezető bankjától függ.
           </Sub>
           <Sub n="6.4">
-            A legkisebb levonható összeg <span className="text-slate-100">500 Ft</span>. Nagyon
+            A legkisebb levonható összeg <span className="text-ink">500 Ft</span>. Nagyon
             rövid töltés esetén is legalább ennyi kerül felszámításra. A levont összeg nem
             haladhatja meg a zárolt összeget.
           </Sub>
@@ -163,7 +163,7 @@ export default function Aszf() {
             visszatérítésre kerül.
           </Sub>
           <Sub n="6.6">
-            Az online bankkártyás fizetést a <span className="text-slate-100">Stripe</span>{" "}
+            Az online bankkártyás fizetést a <span className="text-ink">Stripe</span>{" "}
             (Stripe Payments Europe, Ltd.) biztosítja. A kártyaadatok a Szolgáltatóhoz nem
             jutnak el, azokat kizárólag a Stripe kezeli, titkosított módon.
           </Sub>
@@ -188,7 +188,7 @@ export default function Aszf() {
           </Sub>
           <Sub n="7.2">
             Hibás teljesítés vagy téves terhelés esetén az Ügyfél az{" "}
-            <a className="text-blue-400" href="mailto:szerviz@energiafelho.hu">szerviz@energiafelho.hu</a>{" "}
+            <a className="text-brand-action hover:underline" href="mailto:szerviz@energiafelho.hu">szerviz@energiafelho.hu</a>{" "}
             címen élhet igénnyel; a Szolgáltató a jogos igényt visszatéríti.
           </Sub>
         </Section>
@@ -222,7 +222,7 @@ export default function Aszf() {
         <Section n="9" title="Ügyfélszolgálat és hibabejelentés">
           <Sub n="9.1">
             Az Ügyfél a Szolgáltatással kapcsolatos kérdéseit, illetve a tapasztalt hibákat az{" "}
-            <a className="text-blue-400" href="mailto:szerviz@energiafelho.hu">szerviz@energiafelho.hu</a>{" "}
+            <a className="text-brand-action hover:underline" href="mailto:szerviz@energiafelho.hu">szerviz@energiafelho.hu</a>{" "}
             e-mail-címen jelentheti be a Szolgáltató felé.
           </Sub>
         </Section>
@@ -237,7 +237,7 @@ export default function Aszf() {
             Fogyasztói jogvita esetén az Ügyfél a lakóhelye szerint illetékes békéltető
             testülethez fordulhat (a fogyasztóvédelemről szóló 1997. évi CLV. törvény szerint),
             valamint igénybe veheti az Európai Bizottság online vitarendezési platformját:{" "}
-            <a className="text-blue-400" href="https://ec.europa.eu/odr" target="_blank" rel="noreferrer">ec.europa.eu/odr</a>.
+            <a className="text-brand-action hover:underline" href="https://ec.europa.eu/odr" target="_blank" rel="noreferrer">ec.europa.eu/odr</a>.
           </Sub>
         </Section>
 
@@ -250,7 +250,7 @@ export default function Aszf() {
           </Sub>
           <Sub n="11.2">
             Az adatkezelés részletes szabályait a külön{" "}
-            <a className="text-blue-400" href="/adatkezeles">Adatkezelési tájékoztató</a>{" "}
+            <a className="text-brand-action hover:underline" href="/adatkezeles">Adatkezelési tájékoztató</a>{" "}
             tartalmazza, amely a Weboldalon érhető el.
           </Sub>
         </Section>
@@ -274,7 +274,7 @@ export default function Aszf() {
         </Section>
 
         <div className="pt-2">
-          <a href="/" className="text-sm text-slate-500 hover:text-slate-300 transition">
+          <a href="/" className="text-sm text-ink-muted hover:text-ink transition">
             ← Vissza a főoldalra
           </a>
         </div>

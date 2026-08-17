@@ -49,13 +49,13 @@ export default function PaySuccess() {
 
   if (phase === "no_intent") {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+      <div className="min-h-screen flex flex-col">
         <AppHeader />
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="max-w-md w-full card cardBody text-center space-y-4">
             <div className="text-3xl">⚠️</div>
-            <div className="text-lg font-semibold text-red-300">Érvénytelen hivatkozás</div>
-            <p className="text-slate-400 text-sm">A link nem tartalmaz érvényes azonosítót.</p>
+            <div className="text-lg font-semibold text-rose-600">Érvénytelen hivatkozás</div>
+            <p className="text-ink-soft text-sm">A link nem tartalmaz érvényes azonosítót.</p>
             <a href="/" className="btn btnPrimary inline-flex">← Vissza a töltőkhöz</a>
           </div>
         </div>
@@ -65,17 +65,17 @@ export default function PaySuccess() {
 
   if (phase === "timeout") {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+      <div className="min-h-screen flex flex-col">
         <AppHeader />
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="max-w-md w-full card cardBody text-center space-y-4">
             <div className="text-3xl">⏱️</div>
-            <div className="text-lg font-semibold text-amber-300">A töltés indítása késik</div>
-            <p className="text-slate-400 text-sm">
+            <div className="text-lg font-semibold text-brand-amber">A töltés indítása késik</div>
+            <p className="text-ink-soft text-sm">
               A fizetés valószínűleg sikeres volt, de a töltő visszajelzése még várat magára.
               Kérjük ellenőrizze email-fiókját — hamarosan értesítőt küldünk.
             </p>
-            <p className="text-slate-500 text-xs">
+            <p className="text-ink-muted text-xs">
               Ha perceken belül sem érkezik értesítő, kérjük vegye fel a kapcsolatot
               ügyfélszolgálatunkkal.
             </p>
@@ -87,33 +87,33 @@ export default function PaySuccess() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+    <div className="min-h-screen flex flex-col">
       <AppHeader />
       <div className="flex-1 flex items-center justify-center p-6">
         <div className="max-w-md w-full card cardBody text-center space-y-6">
 
-          <div className="w-16 h-16 rounded-full bg-emerald-900/40 border border-emerald-700/60 flex items-center justify-center mx-auto text-3xl">
+          <div className="w-16 h-16 rounded-full bg-[#e6faf4] border border-brand-green/50 text-[#037a5c] flex items-center justify-center mx-auto text-3xl">
             ✓
           </div>
 
           <div>
-            <div className="text-xl font-semibold text-emerald-300">Fizetés sikeres</div>
-            <p className="text-slate-400 text-sm mt-2">
+            <div className="text-xl font-semibold text-[#037a5c]">Fizetés sikeres</div>
+            <p className="text-ink-soft text-sm mt-2">
               A töltő fogadta a kérést. A session indítása folyamatban…
             </p>
           </div>
 
           <div className="flex justify-center gap-1.5">
-            {[0, 1, 2].map((i) => (
+            {["bg-brand-yellow", "bg-brand-blue", "bg-brand-green"].map((c, i) => (
               <div
                 key={i}
-                className="w-2 h-2 rounded-full bg-blue-500 animate-bounce"
+                className={`w-2 h-2 rounded-full animate-bounce ${c}`}
                 style={{ animationDelay: `${i * 0.15}s` }}
               />
             ))}
           </div>
 
-          <p className="text-xs text-slate-600">{elapsed}s</p>
+          <p className="text-xs text-ink-muted">{elapsed}s</p>
         </div>
       </div>
     </div>

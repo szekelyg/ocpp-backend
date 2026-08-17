@@ -85,7 +85,7 @@ def module_url(identifier: str) -> str:
 
 def business_details() -> dict:
     """OCPI BusinessDetails for our CPO role object."""
-    out: dict = {"name": settings.ocpi_business_name or "Energiafelhő"}
+    out: dict = {"name": settings.ocpi_business_name or "Energiafelhő Kft."}
     if settings.ocpi_business_website:
         out["website"] = settings.ocpi_business_website
     if settings.ocpi_business_logo_url:

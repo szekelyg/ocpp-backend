@@ -13,19 +13,20 @@ import StatusBadge from "../ui/StatusBadge";
 import { placeLines } from "../../utils/format";
 
 // Státusz → szín
+// A matrica-paletta színei
 const STATUS_COLOR = {
-  available:     "#22c55e", // zöld
-  charging:      "#3b82f6", // kék
-  preparing:     "#f59e0b", // sárga
-  finishing:     "#f59e0b", // sárga
+  available:     "#04cd99", // brand zöld
+  charging:      "#6699ff", // brand kék
+  preparing:     "#ffcd60", // brand sárga
+  finishing:     "#ffcd60", // brand sárga
   faulted:       "#ef4444", // piros
   unavailable:   "#ef4444", // piros
   reserved:      "#a855f7", // lila
-  offline:       "#6b7280", // szürke
+  offline:       "#949eb0", // szürke
 };
 
 function statusColor(status) {
-  return STATUS_COLOR[String(status || "").toLowerCase()] || "#6b7280";
+  return STATUS_COLOR[String(status || "").toLowerCase()] || "#949eb0";
 }
 
 function makeIcon(color) {
@@ -190,7 +191,7 @@ function LocateControl() {
           disabled={busy}
           title="Hol vagyok?"
           aria-label="Hol vagyok?"
-          className="flex items-center gap-1.5 rounded-full bg-white/95 hover:bg-white text-slate-800 shadow-lg border border-slate-300 px-3 py-2 text-sm font-medium disabled:opacity-60 transition"
+          className="flex items-center gap-1.5 rounded-full bg-white/95 hover:bg-white text-ink shadow-card border border-brand-line px-3 py-2 text-sm font-medium disabled:opacity-60 transition"
         >
           <span className="text-base leading-none">{busy ? "⏳" : "📍"}</span>
           <span className="hidden sm:inline">{busy ? "Keresés…" : "Hol vagyok?"}</span>
@@ -206,7 +207,7 @@ function LocateControl() {
         <CircleMarker
           center={userPos}
           radius={9}
-          pathOptions={{ color: "#2563eb", weight: 3, fillColor: "#3b82f6", fillOpacity: 0.5 }}
+          pathOptions={{ color: "#2f62da", weight: 3, fillColor: "#6699ff", fillOpacity: 0.5 }}
         >
           <Popup>Itt vagy</Popup>
         </CircleMarker>
@@ -258,30 +259,30 @@ export default function MapView({ points = [], onSelect, onStartFlow }) {
                 <div className="font-semibold">{cp.location_name || cp.ocpp_id}</div>
                 <StatusBadge status={cp.status} />
                 <div>{lines[0]}</div>
-                {lines[1] ? <div className="text-slate-500">{lines[1]}</div> : null}
+                {lines[1] ? <div className="text-ink-muted">{lines[1]}</div> : null}
                 {(cp.connector_type || cp.max_power_kw) && (
                   <div className="flex flex-wrap gap-1">
                     {cp.connector_type && (
-                      <span className="text-xs bg-gray-100 border border-gray-300 rounded px-1.5 py-0.5 text-gray-600">
+                      <span className="text-xs bg-brand-panel border border-brand-line rounded px-1.5 py-0.5 text-ink-soft">
                         {cp.connector_type}
                       </span>
                     )}
                     {cp.max_power_kw && (
-                      <span className="text-xs bg-gray-100 border border-gray-300 rounded px-1.5 py-0.5 text-gray-600">
+                      <span className="text-xs bg-brand-panel border border-brand-line rounded px-1.5 py-0.5 text-ink-soft">
                         {cp.max_power_kw} kW
                       </span>
                     )}
                   </div>
                 )}
                 {cp.price_huf_per_kwh > 0 && (
-                  <div className="font-semibold text-emerald-600">
+                  <div className="font-semibold text-[#037a5c]">
                     {cp.price_huf_per_kwh.toLocaleString("hu-HU")} Ft/kWh
                   </div>
                 )}
                 {STARTABLE.has(String(cp.status || "").toLowerCase()) && (
                   <button
                     onClick={() => { onSelect(cp.id); onStartFlow?.(cp.id); }}
-                    className="mt-1 w-full text-center bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold py-1.5 px-3 rounded-lg"
+                    className="mt-1 w-full text-center bg-brand-action hover:bg-[#2451bd] text-white text-xs font-semibold py-1.5 px-3 rounded-lg"
                   >
                     ⚡ Töltés indítása
                   </button>

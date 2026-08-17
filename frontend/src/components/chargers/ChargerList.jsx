@@ -22,7 +22,7 @@ export default function ChargerList({ items, selectedId, onSelect, onToggle, sel
 
   if (!list.length) {
     return (
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">
+      <div className="rounded-xl border border-brand-line bg-brand-panel p-6 text-center text-sm text-ink-muted">
         Nincs találat.
       </div>
     );
@@ -38,7 +38,7 @@ export default function ChargerList({ items, selectedId, onSelect, onToggle, sel
             onClick={() => onToggle(cp.id)}
           />
           {cp.id === selectedId && selectedCp && (
-            <div className="rounded-xl border border-blue-500/20 bg-slate-800/50 px-4 pt-4 pb-3">
+            <div className="rounded-xl border border-brand-action/25 bg-brand-panel px-4 pt-4 pb-3">
               <SelectedChargerCard
                 cp={selectedCp}
                 autoOpenModal={autoOpenModal}

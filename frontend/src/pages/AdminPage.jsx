@@ -41,22 +41,22 @@ function timeAgo(iso) {
 // ── Status colours ────────────────────────────────────────────────────────────
 
 const STATUS_COLORS = {
-  available:       "bg-emerald-500/20 text-emerald-300 border-emerald-700/40",
-  charging:        "bg-blue-500/20 text-blue-300 border-blue-700/40",
-  preparing:       "bg-amber-500/20 text-amber-300 border-amber-700/40",
-  finishing:       "bg-amber-500/20 text-amber-300 border-amber-700/40",
-  offline:         "bg-slate-700/40 text-slate-400 border-slate-600/30",
-  faulted:         "bg-red-500/20 text-red-300 border-red-700/40",
-  paid:            "bg-emerald-500/20 text-emerald-300 border-emerald-700/40",
-  pending_payment: "bg-amber-500/20 text-amber-300 border-amber-700/40",
-  expired:         "bg-slate-700/40 text-slate-400 border-slate-600/30",
-  cancelled:       "bg-slate-700/40 text-slate-400 border-slate-600/30",
-  failed:          "bg-red-500/20 text-red-300 border-red-700/40",
+  available:       "bg-[#e6faf4] text-[#037a5c] border-[#04cd99]/40",
+  charging:        "bg-[#eef3ff] text-brand-action border-brand-blue/40",
+  preparing:       "bg-brand-cream text-brand-amber border-brand-yellow/60",
+  finishing:       "bg-brand-cream text-brand-amber border-brand-yellow/60",
+  offline:         "bg-slate-100 text-ink-muted border-slate-200",
+  faulted:         "bg-rose-50 text-rose-600 border-rose-300",
+  paid:            "bg-[#e6faf4] text-[#037a5c] border-[#04cd99]/40",
+  pending_payment: "bg-brand-cream text-brand-amber border-brand-yellow/60",
+  expired:         "bg-slate-100 text-ink-muted border-slate-200",
+  cancelled:       "bg-slate-100 text-ink-muted border-slate-200",
+  failed:          "bg-rose-50 text-rose-600 border-rose-300",
 };
 
 function Badge({ status, label }) {
   const cls = STATUS_COLORS[String(status || "").toLowerCase()]
-    || "bg-slate-700/40 text-slate-400 border-slate-600/30";
+    || "bg-slate-100 text-ink-muted border-slate-200";
   return (
     <span className={`inline-block rounded-md border px-1.5 py-0.5 text-xs font-medium ${cls}`}>
       {label || status || "—"}
@@ -68,27 +68,27 @@ function Badge({ status, label }) {
 
 function Th({ children, className = "" }) {
   return (
-    <th className={`px-3 py-2 text-left text-xs font-semibold text-slate-400 whitespace-nowrap ${className}`}>
+    <th className={`px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-ink-muted whitespace-nowrap ${className}`}>
       {children}
     </th>
   );
 }
 function Td({ children, className = "" }) {
-  return <td className={`px-3 py-2 text-sm text-slate-300 align-top ${className}`}>{children}</td>;
+  return <td className={`px-3 py-2 text-sm text-ink-soft align-top ${className}`}>{children}</td>;
 }
 function SectionHead({ children }) {
-  return <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400 mb-3">{children}</h2>;
+  return <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-muted mb-3">{children}</h2>;
 }
 
 // ── Action button ─────────────────────────────────────────────────────────────
 
 function ActionBtn({ onClick, busy, label, busyLabel, color = "slate", title }) {
   const colors = {
-    slate:   "border-slate-600 bg-slate-700/30 text-slate-300 hover:bg-slate-700/60",
-    blue:    "border-blue-700/50 bg-blue-900/20 text-blue-300 hover:bg-blue-900/40",
-    rose:    "border-rose-700/50 bg-rose-900/20 text-rose-300 hover:bg-rose-900/40",
-    amber:   "border-amber-700/50 bg-amber-900/20 text-amber-300 hover:bg-amber-900/40",
-    emerald: "border-emerald-700/50 bg-emerald-900/20 text-emerald-300 hover:bg-emerald-900/40",
+    slate:   "border-brand-line bg-white text-ink-soft hover:bg-brand-panel",
+    blue:    "border-brand-blue/40 bg-[#eef3ff] text-brand-action hover:bg-[#dde8ff]",
+    rose:    "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100",
+    amber:   "border-brand-yellow/60 bg-brand-cream text-brand-amber hover:bg-[#ffedc2]",
+    emerald: "border-[#04cd99]/40 bg-[#e6faf4] text-[#037a5c] hover:bg-[#d2f5ea]",
   };
   return (
     <button
@@ -120,8 +120,8 @@ function Toasts({ toasts }) {
       {toasts.map(t => (
         <div key={t.id} className={`rounded-xl border px-4 py-2.5 text-sm shadow-lg max-w-sm ${
           t.type === "ok"
-            ? "border-emerald-700/50 bg-emerald-950/90 text-emerald-200"
-            : "border-red-700/50 bg-red-950/90 text-red-200"
+            ? "border-[#04cd99]/40 bg-[#e6faf4] text-[#037a5c]"
+            : "border-rose-200 bg-rose-50 text-rose-700"
         }`}>
           {t.msg}
         </div>
@@ -147,34 +147,34 @@ function LoginForm({ onLogin }) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
-      <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-xl">
+    <div className="min-h-screen flex items-center justify-center p-6">
+      <div className="w-full max-w-sm bg-white border border-brand-line rounded-2xl p-8 shadow-card">
         <div className="text-center mb-6">
-          <div className="text-2xl font-bold text-slate-100">Admin</div>
-          <div className="text-sm text-slate-400 mt-1">Energiafelhő Kft.</div>
+          <div className="text-2xl font-bold text-ink">Admin</div>
+          <div className="text-sm text-ink-soft mt-1">Energiafelhő Kft.</div>
         </div>
         <form onSubmit={submit} className="space-y-4">
           <div>
-            <label className="block text-xs text-slate-400 mb-1.5">Felhasználónév</label>
+            <label className="block text-xs text-ink-soft mb-1.5">Felhasználónév</label>
             <input
-              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-slate-100 outline-none focus:ring-2 focus:ring-blue-500/40 text-sm"
+              className="field"
               value={user} onChange={e => setUser(e.target.value)}
               autoFocus autoComplete="username"
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1.5">Jelszó</label>
+            <label className="block text-xs text-ink-soft mb-1.5">Jelszó</label>
             <input
               type="password"
-              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-slate-100 outline-none focus:ring-2 focus:ring-blue-500/40 text-sm"
+              className="field"
               value={pass} onChange={e => setPass(e.target.value)}
               autoComplete="current-password"
             />
           </div>
-          {err && <div className="text-sm text-red-400">{err}</div>}
+          {err && <div className="text-sm text-rose-600">{err}</div>}
           <button
             type="submit" disabled={busy}
-            className="w-full rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 text-sm transition disabled:opacity-50"
+            className="w-full rounded-xl bg-brand-action hover:bg-[#2451bd] text-white font-semibold py-2.5 text-sm transition disabled:opacity-50"
           >
             {busy ? "…" : "Bejelentkezés"}
           </button>
@@ -188,34 +188,34 @@ function LoginForm({ onLogin }) {
 
 function StatCard({ label, value, sub, accent, alert }) {
   const accents = {
-    blue:    "border-blue-700/30 bg-blue-950/20",
-    emerald: "border-emerald-700/30 bg-emerald-950/20",
-    amber:   "border-amber-700/30 bg-amber-950/20",
-    rose:    "border-rose-700/30 bg-rose-950/20",
-    slate:   "border-slate-700/30 bg-slate-800/20",
+    blue:    "border-brand-blue/40 bg-[#eef3ff]",
+    emerald: "border-[#04cd99]/40 bg-[#e6faf4]",
+    amber:   "border-brand-yellow/60 bg-brand-cream",
+    rose:    "border-rose-200 bg-rose-50",
+    slate:   "border-brand-line bg-white",
   };
   return (
     <div className={`rounded-2xl border p-4 ${accents[accent] || accents.slate}`}>
-      <div className="text-xs text-slate-400 mb-1">{label}</div>
-      <div className={`text-2xl font-semibold tabular-nums ${alert ? "text-rose-300" : "text-slate-100"}`}>
+      <div className="text-xs text-ink-soft mb-1">{label}</div>
+      <div className={`text-2xl font-semibold tabular-nums ${alert ? "text-rose-600" : "text-ink"}`}>
         {value ?? "—"}
       </div>
-      {sub && <div className="text-xs text-slate-500 mt-0.5">{sub}</div>}
+      {sub && <div className="text-xs text-ink-muted mt-0.5">{sub}</div>}
     </div>
   );
 }
 
 function OverviewTab({ stats, sessions }) {
-  if (!stats) return <div className="text-slate-500 text-sm py-8 text-center">Betöltés…</div>;
+  if (!stats) return <div className="text-ink-muted text-sm py-8 text-center">Betöltés…</div>;
   const activeSessions = sessions.filter(s => s.is_active);
   const missingInvoices = stats.alerts?.missing_invoices || 0;
 
   return (
     <div className="space-y-8">
       {missingInvoices > 0 && (
-        <div className="rounded-xl border border-rose-700/50 bg-rose-950/30 px-4 py-3 flex items-center gap-3">
-          <span className="text-rose-300 font-semibold text-sm">⚠ {missingInvoices} befejezett session-ból hiányzik a számla</span>
-          <span className="text-xs text-rose-400/70">Ellenőrizd a Sessionök tabon</span>
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 flex items-center gap-3">
+          <span className="text-rose-700 font-semibold text-sm">⚠ {missingInvoices} befejezett session-ból hiányzik a számla</span>
+          <span className="text-xs text-rose-600/80">Ellenőrizd a Sessionök tabon</span>
         </div>
       )}
 
@@ -243,9 +243,9 @@ function OverviewTab({ stats, sessions }) {
         <SectionHead>Töltők állapota</SectionHead>
         <div className="flex flex-wrap gap-2">
           {Object.entries(stats.charge_points.by_status).map(([st, cnt]) => (
-            <div key={st} className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/50 px-3 py-2">
+            <div key={st} className="flex items-center gap-2 rounded-xl border border-brand-line bg-white px-3 py-2">
               <Badge status={st} label={st} />
-              <span className="text-slate-200 font-semibold text-sm">{cnt}</span>
+              <span className="text-ink font-semibold text-sm">{cnt}</span>
             </div>
           ))}
         </div>
@@ -254,14 +254,14 @@ function OverviewTab({ stats, sessions }) {
       {activeSessions.length > 0 && (
         <div>
           <SectionHead>Aktív sessionök ({activeSessions.length})</SectionHead>
-          <div className="overflow-x-auto rounded-xl border border-slate-800">
+          <div className="overflow-x-auto rounded-xl border border-brand-line">
             <table className="w-full">
-              <thead className="bg-slate-800/60">
+              <thead className="bg-brand-panel">
                 <tr><Th>#</Th><Th>Töltő</Th><Th>Email</Th><Th>Kezdés</Th><Th>Időtartam</Th><Th>Energia</Th><Th>Díj</Th></tr>
               </thead>
-              <tbody className="divide-y divide-slate-800">
+              <tbody className="divide-y divide-brand-line">
                 {activeSessions.map(s => (
-                  <tr key={s.id} className="hover:bg-slate-800/30">
+                  <tr key={s.id} className="hover:bg-brand-panel">
                     <Td>{s.id}</Td>
                     <Td><span className="font-mono text-xs">{s.charge_point_ocpp_id}</span></Td>
                     <Td>{s.anonymous_email || "—"}</Td>
@@ -350,24 +350,24 @@ function ChargersTab({ chargers, apiFetch, toast }) {
   return (
     <div>
       <SectionHead>Töltők ({chargers.length})</SectionHead>
-      <div className="overflow-x-auto rounded-xl border border-slate-800">
+      <div className="overflow-x-auto rounded-xl border border-brand-line">
         <table className="w-full">
-          <thead className="bg-slate-800/60">
+          <thead className="bg-brand-panel">
             <tr>
               <Th>ID</Th><Th>OCPP ID</Th><Th>Státusz</Th><Th>Helyszín</Th>
               <Th>Csatl.</Th><Th>Max kW</Th><Th>Model</Th><Th>Firmware</Th>
               <Th>Sorozatszám</Th><Th>Utoljára látva</Th><Th>Felvéve</Th><Th>Műveletek</Th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800">
+          <tbody className="divide-y divide-brand-line">
             {chargers.map(cp => (
-              <tr key={cp.id} className="hover:bg-slate-800/30">
+              <tr key={cp.id} className="hover:bg-brand-panel">
                 <Td>{cp.id}</Td>
-                <Td><span className="font-mono text-xs text-slate-200">{cp.ocpp_id}</span></Td>
+                <Td><span className="font-mono text-xs text-ink">{cp.ocpp_id}</span></Td>
                 <Td><Badge status={cp.status} label={cp.status} /></Td>
                 <Td>
                   <div>{cp.location_name || "—"}</div>
-                  {cp.address_text && <div className="text-xs text-slate-500">{cp.address_text}</div>}
+                  {cp.address_text && <div className="text-xs text-ink-muted">{cp.address_text}</div>}
                 </Td>
                 <Td>{cp.connector_type || "—"}</Td>
                 <Td>{cp.max_power_kw ? `${cp.max_power_kw} kW` : "—"}</Td>
@@ -413,21 +413,21 @@ function ChargersTab({ chargers, apiFetch, toast }) {
 
       {/* GetConfig modal */}
       {configOpen && (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setConfigOpen(null)}>
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b border-slate-700 flex items-center justify-between">
-              <div className="font-semibold text-slate-100">GetConfiguration – {configOpen}</div>
-              <button onClick={() => setConfigOpen(null)} className="text-slate-400 hover:text-slate-200 text-xl leading-none">×</button>
+        <div className="fixed inset-0 bg-ink/40 z-50 flex items-center justify-center p-4" onClick={() => setConfigOpen(null)}>
+          <div className="bg-white border border-brand-line rounded-2xl shadow-card max-w-2xl w-full max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-brand-line flex items-center justify-between">
+              <div className="font-semibold text-ink">GetConfiguration – {configOpen}</div>
+              <button onClick={() => setConfigOpen(null)} className="text-ink-soft hover:text-ink text-xl leading-none">×</button>
             </div>
             <div className="overflow-auto p-4 flex-1">
               {configLoading ? (
-                <div className="text-slate-400 text-sm">Lekérdezés…</div>
+                <div className="text-ink-soft text-sm">Lekérdezés…</div>
               ) : configData?.error ? (
-                <div className="text-red-400 text-sm">{configData.error}</div>
+                <div className="text-rose-600 text-sm">{configData.error}</div>
               ) : configData?.configurationKey ? (
                 <table className="w-full text-xs">
                   <thead><tr><Th>Key</Th><Th>Value</Th><Th>Readonly</Th></tr></thead>
-                  <tbody className="divide-y divide-slate-800">
+                  <tbody className="divide-y divide-brand-line">
                     {configData.configurationKey.map(k => (
                       <tr key={k.key}>
                         <Td className="font-mono">{k.key}</Td>
@@ -438,7 +438,7 @@ function ChargersTab({ chargers, apiFetch, toast }) {
                   </tbody>
                 </table>
               ) : (
-                <pre className="text-xs text-slate-300 whitespace-pre-wrap">{JSON.stringify(configData, null, 2)}</pre>
+                <pre className="text-xs text-ink-soft whitespace-pre-wrap">{JSON.stringify(configData, null, 2)}</pre>
               )}
             </div>
           </div>
@@ -471,37 +471,37 @@ function SessionDetail({ s, apiFetch, toast, onRefresh }) {
   }
 
   return (
-    <tr className="bg-slate-800/20">
+    <tr className="bg-brand-panel/60">
       <td colSpan={10} className="px-4 py-4">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs mb-4">
           <div>
-            <div className="text-slate-500 mb-0.5">OCPP Transaction ID</div>
-            <div className="font-mono text-slate-300">{s.ocpp_transaction_id || "—"}</div>
+            <div className="text-ink-muted mb-0.5">OCPP Transaction ID</div>
+            <div className="font-mono text-ink-soft">{s.ocpp_transaction_id || "—"}</div>
           </div>
           <div>
-            <div className="text-slate-500 mb-0.5">Helyszín</div>
-            <div className="text-slate-300">{s.charge_point_location || "—"}</div>
+            <div className="text-ink-muted mb-0.5">Helyszín</div>
+            <div className="text-ink-soft">{s.charge_point_location || "—"}</div>
           </div>
           <div>
-            <div className="text-slate-500 mb-0.5">Mérő start / stop</div>
-            <div className="font-mono text-slate-300">
+            <div className="text-ink-muted mb-0.5">Mérő start / stop</div>
+            <div className="font-mono text-ink-soft">
               {s.meter_start_wh != null ? `${s.meter_start_wh} Wh` : "—"} → {s.meter_stop_wh != null ? `${s.meter_stop_wh} Wh` : "—"}
             </div>
           </div>
           <div>
-            <div className="text-slate-500 mb-0.5">Befejezve</div>
-            <div className="text-slate-300">{fmtDt(s.finished_at)}</div>
+            <div className="text-ink-muted mb-0.5">Befejezve</div>
+            <div className="text-ink-soft">{fmtDt(s.finished_at)}</div>
           </div>
           {s.invoice_number && (
             <div>
-              <div className="text-slate-500 mb-0.5">Számlaszám</div>
-              <div className="font-mono text-emerald-300">{s.invoice_number}</div>
+              <div className="text-ink-muted mb-0.5">Számlaszám</div>
+              <div className="font-mono text-[#037a5c]">{s.invoice_number}</div>
             </div>
           )}
           {missingInvoice && (
             <div>
-              <div className="text-slate-500 mb-0.5">Számla</div>
-              <span className="inline-block rounded border border-rose-700/50 bg-rose-900/20 px-1.5 py-0.5 text-rose-300 text-xs">
+              <div className="text-ink-muted mb-0.5">Számla</div>
+              <span className="inline-block rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-rose-700 text-xs">
                 Hiányzik!
               </span>
             </div>
@@ -509,16 +509,16 @@ function SessionDetail({ s, apiFetch, toast, onRefresh }) {
           {s.intent && (
             <>
               <div>
-                <div className="text-slate-500 mb-0.5">Fizetési státusz</div>
+                <div className="text-ink-muted mb-0.5">Fizetési státusz</div>
                 <Badge status={s.intent.status} label={s.intent.status} />
               </div>
               <div>
-                <div className="text-slate-500 mb-0.5">Zárolás</div>
-                <div className="text-slate-300">{fmtHuf(s.intent.hold_amount_huf)}</div>
+                <div className="text-ink-muted mb-0.5">Zárolás</div>
+                <div className="text-ink-soft">{fmtHuf(s.intent.hold_amount_huf)}</div>
               </div>
               <div>
-                <div className="text-slate-500 mb-0.5">Számlázás</div>
-                <div className="text-slate-300 leading-relaxed">
+                <div className="text-ink-muted mb-0.5">Számlázás</div>
+                <div className="text-ink-soft leading-relaxed">
                   {s.intent.billing_name}
                   {s.intent.billing_company && <><br />{s.intent.billing_company}</>}
                   <br />{[s.intent.billing_zip, s.intent.billing_city].filter(Boolean).join(" ")}, {s.intent.billing_country}
@@ -527,14 +527,14 @@ function SessionDetail({ s, apiFetch, toast, onRefresh }) {
               </div>
               {s.intent.stripe_payment_intent_id && (
                 <div>
-                  <div className="text-slate-500 mb-0.5">Stripe PI</div>
-                  <div className="font-mono text-slate-400 text-xs break-all">{s.intent.stripe_payment_intent_id}</div>
+                  <div className="text-ink-muted mb-0.5">Stripe PI</div>
+                  <div className="font-mono text-ink-soft text-xs break-all">{s.intent.stripe_payment_intent_id}</div>
                 </div>
               )}
               {s.intent.last_error && (
                 <div className="col-span-2">
-                  <div className="text-slate-500 mb-0.5">Utolsó hiba</div>
-                  <div className="text-red-400">{s.intent.last_error}</div>
+                  <div className="text-ink-muted mb-0.5">Utolsó hiba</div>
+                  <div className="text-rose-600">{s.intent.last_error}</div>
                 </div>
               )}
             </>
@@ -542,8 +542,8 @@ function SessionDetail({ s, apiFetch, toast, onRefresh }) {
         </div>
 
         {/* Műveletek */}
-        <div className="border-t border-slate-700/50 pt-3">
-          <div className="text-xs text-slate-500 mb-2">Műveletek</div>
+        <div className="border-t border-brand-line pt-3">
+          <div className="text-xs text-ink-muted mb-2">Műveletek</div>
           <div className="flex flex-wrap gap-2">
             {/* OCPP Stop – csak aktív, OCPP sessionre */}
             {s.is_active && s.ocpp_transaction_id && (
@@ -560,15 +560,15 @@ function SessionDetail({ s, apiFetch, toast, onRefresh }) {
             {/* Force close – aktív sessionre */}
             {s.is_active && (
               confirmForceClose ? (
-                <div className="flex items-center gap-2 rounded-lg border border-rose-700/50 bg-rose-950/30 px-2.5 py-1">
-                  <span className="text-xs text-rose-300">Biztosan lezárod OCPP nélkül?</span>
+                <div className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1">
+                  <span className="text-xs text-rose-700">Biztosan lezárod OCPP nélkül?</span>
                   <ActionBtn color="rose" label="Igen" busy={busy === "forceclose"}
                     onClick={() => { setConfirmForceClose(false); doAction("forceclose", `/api/admin/sessions/${s.id}/force-close`, "POST", {
                       ok: "Session lezárva (DB), Stripe settle futott",
                       err: e => `Force close hiba: ${e.message}`,
                     }); }}
                   />
-                  <button className="text-xs text-slate-400 hover:text-slate-200" onClick={() => setConfirmForceClose(false)}>Mégse</button>
+                  <button className="text-xs text-ink-soft hover:text-ink" onClick={() => setConfirmForceClose(false)}>Mégse</button>
                 </div>
               ) : (
                 <ActionBtn
@@ -645,7 +645,7 @@ function SessionsTab({ sessions, chargers, apiFetch, toast, onRefresh, highlight
   const displayed = showAll ? finished : finished.slice(0, 30);
 
   const cols = (
-    <thead className="bg-slate-800/60">
+    <thead className="bg-brand-panel">
       <tr>
         <Th>#</Th><Th>Töltő</Th><Th>Email / Számlázási név</Th><Th>Kezdés</Th>
         <Th>Időtartam</Th><Th>Energia</Th><Th>Díj</Th><Th>Státusz</Th><Th>Számla</Th><Th></Th>
@@ -659,17 +659,17 @@ function SessionsTab({ sessions, chargers, apiFetch, toast, onRefresh, highlight
     return (
       <>
         <tr
-          className={`cursor-pointer transition ${expanded ? "bg-slate-800/40" : "hover:bg-slate-800/30"} ${missingInvoice ? "border-l-2 border-l-rose-600/50" : ""}`}
+          className={`cursor-pointer transition ${expanded ? "bg-brand-panel" : "hover:bg-brand-panel"} ${missingInvoice ? "border-l-2 border-l-rose-600/50" : ""}`}
           onClick={() => setExpandedId(expanded ? null : s.id)}
         >
           <Td>
             <span className="font-mono text-xs">{s.id}</span>
-            {s.is_active && <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse align-middle" />}
+            {s.is_active && <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-brand-green animate-pulse align-middle" />}
           </Td>
           <Td><span className="font-mono text-xs">{s.charge_point_ocpp_id}</span></Td>
           <Td>
             <div className="text-xs">{s.anonymous_email || "—"}</div>
-            {s.intent?.billing_name && <div className="text-xs text-slate-500">{s.intent.billing_name}</div>}
+            {s.intent?.billing_name && <div className="text-xs text-ink-muted">{s.intent.billing_name}</div>}
           </Td>
           <Td className="whitespace-nowrap text-xs">{fmtDt(s.started_at)}</Td>
           <Td>{fmtDuration(s.duration_s)}</Td>
@@ -682,13 +682,13 @@ function SessionsTab({ sessions, chargers, apiFetch, toast, onRefresh, highlight
           </Td>
           <Td>
             {s.invoice_number
-              ? <span className="font-mono text-xs text-emerald-400">{s.invoice_number}</span>
+              ? <span className="font-mono text-xs text-[#037a5c]">{s.invoice_number}</span>
               : missingInvoice
-                ? <span className="text-rose-400 text-xs font-semibold">Hiányzik!</span>
-                : <span className="text-slate-600 text-xs">—</span>
+                ? <span className="text-rose-600 text-xs font-semibold">Hiányzik!</span>
+                : <span className="text-ink-muted text-xs">—</span>
             }
           </Td>
-          <Td><span className="text-slate-500 text-xs">{expanded ? "▲" : "▼"}</span></Td>
+          <Td><span className="text-ink-muted text-xs">{expanded ? "▲" : "▼"}</span></Td>
         </tr>
         {expanded && (
           <SessionDetail key={`${s.id}-detail`} s={s} apiFetch={apiFetch} toast={toast} onRefresh={onRefresh} />
@@ -703,28 +703,28 @@ function SessionsTab({ sessions, chargers, apiFetch, toast, onRefresh, highlight
     <div className="space-y-8">
       {/* Töltő szűrő */}
       <div className="flex items-center gap-3">
-        <label className="text-xs text-slate-400 shrink-0">Töltő:</label>
+        <label className="text-xs text-ink-soft shrink-0">Töltő:</label>
         <select
           value={cpFilter} onChange={e => { setCpFilter(e.target.value); setShowAll(false); setExpandedId(null); }}
-          className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-200 outline-none focus:ring-2 focus:ring-blue-500/40"
+          className="rounded-lg border border-brand-line bg-white px-3 py-1.5 text-sm text-ink outline-none focus:ring-2 focus:ring-brand-action/30"
         >
           <option value="">Összes töltő</option>
           {cpOptions.map(id => <option key={id} value={id}>{id}</option>)}
         </select>
         {cpFilter && (
-          <button onClick={() => setCpFilter("")} className="text-xs text-slate-500 hover:text-slate-300">× törlés</button>
+          <button onClick={() => setCpFilter("")} className="text-xs text-ink-muted hover:text-ink">× törlés</button>
         )}
       </div>
 
       <div>
         <SectionHead>Aktív sessionök ({active.length})</SectionHead>
         {active.length === 0 ? (
-          <div className="text-slate-500 text-sm py-4">Nincs aktív session.</div>
+          <div className="text-ink-muted text-sm py-4">Nincs aktív session.</div>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-slate-800">
+          <div className="overflow-x-auto rounded-xl border border-brand-line">
             <table className="w-full">
               {cols}
-              <tbody className="divide-y divide-slate-800">
+              <tbody className="divide-y divide-brand-line">
                 {active.map(s => <SessionRow key={s.id} s={s} />)}
               </tbody>
             </table>
@@ -735,7 +735,7 @@ function SessionsTab({ sessions, chargers, apiFetch, toast, onRefresh, highlight
       <div>
         <div className="flex items-center gap-4 mb-3">
           <SectionHead>Befejezett sessionök ({finished.length})</SectionHead>
-          <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer -mt-3">
+          <label className="flex items-center gap-1.5 text-xs text-ink-soft cursor-pointer -mt-3">
             <input
               type="checkbox" checked={onlyMissing}
               onChange={e => { setOnlyMissing(e.target.checked); setShowAll(false); }}
@@ -744,16 +744,16 @@ function SessionsTab({ sessions, chargers, apiFetch, toast, onRefresh, highlight
             Csak hiányzó számlás
           </label>
         </div>
-        <div className="overflow-x-auto rounded-xl border border-slate-800">
+        <div className="overflow-x-auto rounded-xl border border-brand-line">
           <table className="w-full">
             {cols}
-            <tbody className="divide-y divide-slate-800">
+            <tbody className="divide-y divide-brand-line">
               {displayed.map(s => <SessionRow key={s.id} s={s} />)}
             </tbody>
           </table>
         </div>
         {finished.length > 30 && (
-          <button className="mt-2 text-xs text-blue-400 hover:text-blue-300"
+          <button className="mt-2 text-xs text-brand-action hover:underline"
             onClick={() => setShowAll(v => !v)}>
             {showAll ? "Kevesebb mutatása" : `Mind mutatása (${finished.length})`}
           </button>
@@ -791,28 +791,28 @@ function IntentsTab({ intents, apiFetch, toast, onRefresh }) {
       <div className="flex items-center gap-3 mb-4">
         <SectionHead>Charging intentek ({displayed.length})</SectionHead>
         <div className="flex items-center gap-2 -mt-3">
-          <label className="text-xs text-slate-400 shrink-0">Töltő:</label>
+          <label className="text-xs text-ink-soft shrink-0">Töltő:</label>
           <select
             value={cpFilter} onChange={e => { setCpFilter(e.target.value); setExpandedId(null); }}
-            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-200 outline-none focus:ring-2 focus:ring-blue-500/40"
+            className="rounded-lg border border-brand-line bg-white px-3 py-1.5 text-sm text-ink outline-none focus:ring-2 focus:ring-brand-action/30"
           >
             <option value="">Összes töltő</option>
             {cpOptions.map(id => <option key={id} value={id}>{id}</option>)}
           </select>
           {cpFilter && (
-            <button onClick={() => setCpFilter("")} className="text-xs text-slate-500 hover:text-slate-300">× törlés</button>
+            <button onClick={() => setCpFilter("")} className="text-xs text-ink-muted hover:text-ink">× törlés</button>
           )}
         </div>
       </div>
-      <div className="overflow-x-auto rounded-xl border border-slate-800">
+      <div className="overflow-x-auto rounded-xl border border-brand-line">
         <table className="w-full">
-          <thead className="bg-slate-800/60">
+          <thead className="bg-brand-panel">
             <tr>
               <Th>#</Th><Th>Töltő</Th><Th>Email</Th><Th>Számlázási név</Th>
               <Th>Státusz</Th><Th>Zárolás</Th><Th>Típus</Th><Th>Lejár</Th><Th>Létrehozva</Th><Th></Th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800">
+          <tbody className="divide-y divide-brand-line">
             {displayed.map(i => {
               const expanded = expandedId === i.id;
               const canRefund = i.stripe_payment_intent_id && ["paid", "pending_payment"].includes(i.status);
@@ -820,7 +820,7 @@ function IntentsTab({ intents, apiFetch, toast, onRefresh }) {
                 <>
                   <tr
                     key={i.id}
-                    className={`cursor-pointer transition ${expanded ? "bg-slate-800/40" : "hover:bg-slate-800/30"}`}
+                    className={`cursor-pointer transition ${expanded ? "bg-brand-panel" : "hover:bg-brand-panel"}`}
                     onClick={() => setExpandedId(expanded ? null : i.id)}
                   >
                     <Td><span className="font-mono text-xs">{i.id}</span></Td>
@@ -843,54 +843,54 @@ function IntentsTab({ intents, apiFetch, toast, onRefresh }) {
                     </Td>
                   </tr>
                   {expanded && (
-                    <tr key={`${i.id}-exp`} className="bg-slate-800/20">
+                    <tr key={`${i.id}-exp`} className="bg-brand-panel/60">
                       <td colSpan={10} className="px-4 py-3">
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-xs">
                           <div>
-                            <div className="text-slate-500 mb-0.5">Cím</div>
-                            <div className="text-slate-300">
+                            <div className="text-ink-muted mb-0.5">Cím</div>
+                            <div className="text-ink-soft">
                               {[i.billing_zip, i.billing_city, i.billing_street, i.billing_country].filter(Boolean).join(", ")}
                             </div>
                           </div>
                           {i.billing_company && (
                             <div>
-                              <div className="text-slate-500 mb-0.5">Cégnév</div>
-                              <div className="text-slate-300">{i.billing_company}</div>
+                              <div className="text-ink-muted mb-0.5">Cégnév</div>
+                              <div className="text-ink-soft">{i.billing_company}</div>
                             </div>
                           )}
                           {i.billing_tax_number && (
                             <div>
-                              <div className="text-slate-500 mb-0.5">Adószám</div>
-                              <div className="font-mono text-slate-300">{i.billing_tax_number}</div>
+                              <div className="text-ink-muted mb-0.5">Adószám</div>
+                              <div className="font-mono text-ink-soft">{i.billing_tax_number}</div>
                             </div>
                           )}
                           {i.stripe_payment_intent_id && (
                             <div>
-                              <div className="text-slate-500 mb-0.5">Stripe PI</div>
-                              <div className="font-mono text-slate-400 break-all">{i.stripe_payment_intent_id}</div>
+                              <div className="text-ink-muted mb-0.5">Stripe PI</div>
+                              <div className="font-mono text-ink-soft break-all">{i.stripe_payment_intent_id}</div>
                             </div>
                           )}
                           {i.payment_provider_ref && (
                             <div>
-                              <div className="text-slate-500 mb-0.5">Stripe Checkout Session</div>
-                              <div className="font-mono text-slate-400 break-all">{i.payment_provider_ref}</div>
+                              <div className="text-ink-muted mb-0.5">Stripe Checkout Session</div>
+                              <div className="font-mono text-ink-soft break-all">{i.payment_provider_ref}</div>
                             </div>
                           )}
                           {i.cancel_reason && (
                             <div>
-                              <div className="text-slate-500 mb-0.5">Törlés oka</div>
-                              <div className="text-slate-300">{i.cancel_reason}</div>
+                              <div className="text-ink-muted mb-0.5">Törlés oka</div>
+                              <div className="text-ink-soft">{i.cancel_reason}</div>
                             </div>
                           )}
                           {i.last_error && (
                             <div className="col-span-2">
-                              <div className="text-slate-500 mb-0.5">Utolsó hiba</div>
-                              <div className="text-red-400">{i.last_error}</div>
+                              <div className="text-ink-muted mb-0.5">Utolsó hiba</div>
+                              <div className="text-rose-600">{i.last_error}</div>
                             </div>
                           )}
                           <div>
-                            <div className="text-slate-500 mb-0.5">Frissítve</div>
-                            <div className="text-slate-300">{fmtDt(i.updated_at)}</div>
+                            <div className="text-ink-muted mb-0.5">Frissítve</div>
+                            <div className="text-ink-soft">{fmtDt(i.updated_at)}</div>
                           </div>
                         </div>
                       </td>
@@ -939,29 +939,29 @@ function SearchTab({ apiFetch, toast, onRefresh }) {
           ref={inputRef}
           value={q} onChange={e => setQ(e.target.value)}
           placeholder="Email, session ID, számlaszám, OCPP ID…"
-          className="flex-1 rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-slate-100 outline-none focus:ring-2 focus:ring-blue-500/40 text-sm"
+          className="flex-1 field"
         />
         <button type="submit" disabled={loading || !q.trim()}
-          className="rounded-xl bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 text-sm font-semibold disabled:opacity-40 transition">
+          className="rounded-xl bg-brand-action hover:bg-[#2451bd] text-white px-5 py-2.5 text-sm font-semibold disabled:opacity-40 transition">
           {loading ? "…" : "Keresés"}
         </button>
       </form>
 
       {results && (
         <div className="space-y-6">
-          <div className="text-xs text-slate-400">{total} találat a(z) „{results.query}" keresésre</div>
+          <div className="text-xs text-ink-soft">{total} találat a(z) „{results.query}" keresésre</div>
 
           {results.charge_points.length > 0 && (
             <div>
               <SectionHead>Töltők ({results.charge_points.length})</SectionHead>
-              <div className="overflow-x-auto rounded-xl border border-slate-800">
+              <div className="overflow-x-auto rounded-xl border border-brand-line">
                 <table className="w-full">
-                  <thead className="bg-slate-800/60">
+                  <thead className="bg-brand-panel">
                     <tr><Th>ID</Th><Th>OCPP ID</Th><Th>Státusz</Th><Th>Helyszín</Th><Th>Utoljára látva</Th></tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800">
+                  <tbody className="divide-y divide-brand-line">
                     {results.charge_points.map(cp => (
-                      <tr key={cp.id} className="hover:bg-slate-800/30">
+                      <tr key={cp.id} className="hover:bg-brand-panel">
                         <Td>{cp.id}</Td>
                         <Td><span className="font-mono text-xs">{cp.ocpp_id}</span></Td>
                         <Td><Badge status={cp.status} label={cp.status} /></Td>
@@ -982,17 +982,17 @@ function SearchTab({ apiFetch, toast, onRefresh }) {
                 {results.sessions.map(s => {
                   const missingInvoice = !s.is_active && s.anonymous_email && s.intent && !s.invoice_number;
                   return (
-                    <div key={s.id} className={`rounded-xl border p-4 text-sm ${missingInvoice ? "border-rose-700/40 bg-rose-950/10" : "border-slate-700 bg-slate-800/30"}`}>
+                    <div key={s.id} className={`rounded-xl border p-4 text-sm ${missingInvoice ? "border-rose-200 bg-rose-50" : "border-brand-line bg-white"}`}>
                       <div className="flex items-start justify-between gap-4 mb-2">
                         <div className="flex items-center gap-3">
-                          <span className="font-mono text-slate-400 text-xs">#{s.id}</span>
-                          <span className="font-mono text-xs text-slate-300">{s.charge_point_ocpp_id}</span>
+                          <span className="font-mono text-ink-soft text-xs">#{s.id}</span>
+                          <span className="font-mono text-xs text-ink-soft">{s.charge_point_ocpp_id}</span>
                           {s.is_active ? <Badge status="charging" label="aktív" /> : <Badge status="available" label="kész" />}
-                          {missingInvoice && <span className="text-rose-400 text-xs font-semibold">Számla hiányzik!</span>}
+                          {missingInvoice && <span className="text-rose-600 text-xs font-semibold">Számla hiányzik!</span>}
                         </div>
-                        {s.invoice_number && <span className="font-mono text-xs text-emerald-400">{s.invoice_number}</span>}
+                        {s.invoice_number && <span className="font-mono text-xs text-[#037a5c]">{s.invoice_number}</span>}
                       </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-slate-400">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-ink-soft">
                         <div>{s.anonymous_email || "—"}</div>
                         <div>{fmtDt(s.started_at)}</div>
                         <div>{fmtKwh(s.energy_kwh)} · {fmtHuf(s.cost_huf)}</div>
@@ -1030,14 +1030,14 @@ function SearchTab({ apiFetch, toast, onRefresh }) {
               <SectionHead>Intentek ({results.intents.length})</SectionHead>
               <div className="space-y-2">
                 {results.intents.map(i => (
-                  <div key={i.id} className="rounded-xl border border-slate-700 bg-slate-800/30 p-4 text-sm">
+                  <div key={i.id} className="rounded-xl border border-brand-line bg-white p-4 text-sm">
                     <div className="flex items-center gap-3 mb-1">
-                      <span className="font-mono text-slate-400 text-xs">#{i.id}</span>
+                      <span className="font-mono text-ink-soft text-xs">#{i.id}</span>
                       <Badge status={i.status} label={i.status} />
-                      <span className="text-xs text-slate-300">{i.anonymous_email}</span>
-                      <span className="text-xs text-slate-500">{fmtHuf(i.hold_amount_huf)} zárolás</span>
+                      <span className="text-xs text-ink-soft">{i.anonymous_email}</span>
+                      <span className="text-xs text-ink-muted">{fmtHuf(i.hold_amount_huf)} zárolás</span>
                     </div>
-                    <div className="text-xs text-slate-400">{i.billing_name} · {fmtDt(i.created_at)}</div>
+                    <div className="text-xs text-ink-soft">{i.billing_name} · {fmtDt(i.created_at)}</div>
                     {i.stripe_payment_intent_id && ["paid", "pending_payment"].includes(i.status) && (
                       <div className="mt-2">
                         <ActionBtn color="rose" label="Visszatérítés" onClick={async () => {
@@ -1056,7 +1056,7 @@ function SearchTab({ apiFetch, toast, onRefresh }) {
           )}
 
           {total === 0 && (
-            <div className="text-slate-500 text-sm text-center py-8">Nincs találat.</div>
+            <div className="text-ink-muted text-sm text-center py-8">Nincs találat.</div>
           )}
         </div>
       )}
@@ -1152,50 +1152,50 @@ export default function AdminPage() {
   if (!token) return <LoginForm onLogin={handleLogin} />;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
+    <div className="min-h-screen">
       {/* Header */}
-      <div className="border-b border-slate-800 bg-slate-900/80 sticky top-0 z-10">
+      <div className="border-b border-brand-line bg-white/90 sticky top-0 z-10">
         <div className="mx-auto max-w-screen-2xl px-6 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <span className="font-bold text-slate-100">Admin Dashboard</span>
+            <span className="font-bold text-ink">Admin Dashboard</span>
             {loading && (
               <div className="flex gap-1">
                 {[0,1,2].map(i => (
-                  <div key={i} className="w-1 h-1 rounded-full bg-blue-400 animate-bounce"
+                  <div key={i} className="w-1 h-1 rounded-full bg-brand-action animate-bounce"
                     style={{ animationDelay: `${i * 0.15}s` }} />
                 ))}
               </div>
             )}
             {lastUpdated && !loading && (
-              <span className="text-xs text-slate-500">
+              <span className="text-xs text-ink-muted">
                 {lastUpdated.toLocaleTimeString("hu-HU")}
               </span>
             )}
             {missingInvoices > 0 && (
               <button
                 onClick={() => setTab("sessions")}
-                className="rounded-lg border border-rose-700/50 bg-rose-950/40 px-2 py-0.5 text-xs text-rose-300 hover:bg-rose-950/70"
+                className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-0.5 text-xs text-rose-700 hover:bg-rose-100"
               >
                 ⚠ {missingInvoices} hiányzó számla
               </button>
             )}
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={() => setTab("search")} className="text-xs text-blue-400 hover:text-blue-300">Keresés</button>
-            <button onClick={refresh} className="text-xs text-slate-400 hover:text-slate-200">Frissít</button>
+            <button onClick={() => setTab("search")} className="text-xs text-brand-action hover:underline">Keresés</button>
+            <button onClick={refresh} className="text-xs text-ink-soft hover:text-ink">Frissít</button>
             <button onClick={() => { sessionStorage.removeItem("admin_token"); setToken(""); }}
-              className="text-xs text-slate-500 hover:text-slate-300">Kilépés</button>
+              className="text-xs text-ink-muted hover:text-ink">Kilépés</button>
           </div>
         </div>
         <div className="mx-auto max-w-screen-2xl px-6">
-          <div className="flex gap-0 border-t border-slate-800/50">
+          <div className="flex gap-0 border-t border-brand-line">
             {TABS.map(t => (
               <button key={t.id} onClick={() => setTab(t.id)}
                 className={[
                   "px-4 py-2.5 text-sm font-medium border-b-2 transition -mb-px",
                   tab === t.id
-                    ? "border-blue-500 text-blue-300"
-                    : "border-transparent text-slate-400 hover:text-slate-200",
+                    ? "border-brand-action text-brand-action"
+                    : "border-transparent text-ink-soft hover:text-ink",
                 ].join(" ")}>
                 {t.label}
                 {t.id === "sessions" && missingInvoices > 0 && (

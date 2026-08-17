@@ -112,12 +112,12 @@ export default function ChargingPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+      <div className="min-h-screen flex flex-col">
         <AppHeader />
         <div className="flex-1 flex items-center justify-center">
           <div className="flex gap-1.5">
             {[0, 1, 2].map((i) => (
-              <div key={i} className="w-2 h-2 rounded-full bg-blue-500 animate-bounce"
+              <div key={i} className="w-2 h-2 rounded-full bg-brand-action animate-bounce"
                 style={{ animationDelay: `${i * 0.15}s` }} />
             ))}
           </div>
@@ -128,13 +128,13 @@ export default function ChargingPage() {
 
   if (fetchErr && !session) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+      <div className="min-h-screen flex flex-col">
         <AppHeader />
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="max-w-md w-full card cardBody text-center space-y-4">
             <div className="text-3xl">⚠️</div>
-            <div className="text-lg font-semibold text-red-300">A session nem található</div>
-            <p className="text-slate-400 text-sm">
+            <div className="text-lg font-semibold text-rose-700">A session nem található</div>
+            <p className="text-ink-soft text-sm">
               A töltési munkamenet nem elérhető vagy lejárt.
             </p>
             <a href="/" className="btn btnPrimary inline-flex">← Vissza a töltőkhöz</a>
@@ -149,7 +149,7 @@ export default function ChargingPage() {
   const canStop = session?.is_active && session?.ocpp_transaction_id;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+    <div className="min-h-screen flex flex-col">
       <AppHeader />
       <div className="mx-auto max-w-lg w-full p-6 space-y-5">
 
@@ -157,7 +157,7 @@ export default function ChargingPage() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Töltés</h1>
-            <p className="text-sm text-slate-400 mt-0.5">
+            <p className="text-sm text-ink-soft mt-0.5">
               {cp?.ocpp_id || "—"}
               {cp?.model ? ` · ${cp.model}` : ""}
             </p>
@@ -167,51 +167,51 @@ export default function ChargingPage() {
 
         {/* Fázis banner */}
         {phase === "waiting" && (
-          <div className="rounded-2xl border border-amber-700/60 bg-amber-900/20 px-4 py-3">
-            <div className="font-semibold text-amber-200">⏳ Várakozás az autóra</div>
-            <div className="text-sm text-amber-300/80 mt-0.5">
+          <div className="rounded-2xl border border-brand-yellow/60 bg-brand-cream px-4 py-3">
+            <div className="font-semibold text-brand-amber">⏳ Várakozás az autóra</div>
+            <div className="text-sm text-brand-amber/90 mt-0.5">
               Dugja be az autót a töltőbe a töltés megkezdéséhez.
             </div>
           </div>
         )}
         {phase === "timeout" && (
-          <div className="rounded-2xl border border-red-700/60 bg-red-900/20 px-4 py-3 space-y-1">
-            <div className="font-semibold text-red-300">✕ Töltés nem indult el</div>
-            <div className="text-sm text-red-300/80">
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 space-y-1">
+            <div className="font-semibold text-rose-700">✕ Töltés nem indult el</div>
+            <div className="text-sm text-rose-600">
               Az autó 15 percen belül nem csatlakozott. A munkamenet lezárult,
               a befizetett összeg visszatérítése folyamatban van.
             </div>
             {redirectCountdown !== null && (
-              <div className="text-xs text-slate-400 pt-1">
+              <div className="text-xs text-ink-muted pt-1">
                 Átirányítás a főoldalra {redirectCountdown} másodperc múlva…
               </div>
             )}
           </div>
         )}
         {phase === "connecting" && (
-          <div className="rounded-2xl border border-yellow-700/60 bg-yellow-900/20 px-4 py-3">
-            <div className="font-semibold text-yellow-200">⏳ Csatlakozás folyamatban</div>
-            <div className="text-sm text-yellow-300/80 mt-0.5">
+          <div className="rounded-2xl border border-brand-yellow/60 bg-brand-cream px-4 py-3">
+            <div className="font-semibold text-brand-amber">⏳ Csatlakozás folyamatban</div>
+            <div className="text-sm text-brand-amber/90 mt-0.5">
               A töltő elfogadta a kérést. Dugja be az autót, ha még nem tette meg.
             </div>
           </div>
         )}
         {phase === "charging" && (
-          <div className="rounded-2xl border border-emerald-700/60 bg-emerald-900/20 px-4 py-3">
-            <div className="font-semibold text-emerald-200">⚡ Töltés folyamatban</div>
-            <div className="text-sm text-emerald-300/80 mt-0.5">
+          <div className="rounded-2xl border border-[#04cd99]/40 bg-[#e6faf4] px-4 py-3">
+            <div className="font-semibold text-[#037a5c]">⚡ Töltés folyamatban</div>
+            <div className="text-sm text-[#037a5c]/80 mt-0.5">
               Az autó töltődik.
             </div>
           </div>
         )}
         {phase === "finished" && (
-          <div className="rounded-2xl border border-slate-700 bg-slate-800/40 px-4 py-3 space-y-1">
-            <div className="font-semibold text-slate-200">✓ Töltés befejezve</div>
-            <div className="text-sm text-slate-400 mt-0.5">
+          <div className="rounded-2xl border border-brand-line bg-brand-panel px-4 py-3 space-y-1">
+            <div className="font-semibold text-ink">✓ Töltés befejezve</div>
+            <div className="text-sm text-ink-soft mt-0.5">
               A session lezárult. Az elfogyasztott energia és díj végleges.
             </div>
             {redirectCountdown !== null && (
-              <div className="text-xs text-slate-400 pt-1">
+              <div className="text-xs text-ink-muted pt-1">
                 Átirányítás a főoldalra {redirectCountdown} másodperc múlva…
               </div>
             )}
@@ -243,7 +243,7 @@ export default function ChargingPage() {
                   : "—"}
               </div>
               {session?.price_huf_per_kwh > 0 && (
-                <div className="text-xs text-slate-500 mt-1 leading-snug">
+                <div className="text-xs text-ink-muted mt-1 leading-snug">
                   {session.price_huf_per_kwh.toLocaleString("hu-HU")} Ft/kWh
                   {session?.min_charge_huf > 0 &&
                     ` · min. ${session.min_charge_huf.toLocaleString("hu-HU")} Ft`}
@@ -257,10 +257,42 @@ export default function ChargingPage() {
                   ? `${(session.power_w / 1000).toFixed(1)} kW`
                   : "—"}
               </div>
+              {session?.phases?.list?.length > 0 && (
+                <div className="mt-2">
+                  <div className="text-xs text-ink-muted mb-1.5">
+                    {session.phases.active_count > 0
+                      ? `${session.phases.active_count} fázison tölt`
+                      : "Fázisonként"}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {session.phases.list.map((ph) => (
+                      <span
+                        key={ph.name}
+                        className={[
+                          "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs tabular-nums",
+                          ph.active
+                            ? "border-[#04cd99]/40 bg-[#e6faf4] text-[#037a5c]"
+                            : "border-brand-line bg-brand-panel text-ink-muted",
+                        ].join(" ")}
+                      >
+                        <span className="font-semibold">{ph.name}</span>
+                        <span>
+                          {ph.power_w != null ? `${(ph.power_w / 1000).toFixed(1)} kW` : "—"}
+                        </span>
+                        {ph.current_a != null && (
+                          <span className="text-[10px] opacity-70">
+                            {ph.current_a.toFixed(0)} A
+                          </span>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <div>
               <div className="label mb-1">Indítás</div>
-              <div className="text-sm text-slate-300 tabular-nums">
+              <div className="text-sm text-ink-soft tabular-nums">
                 {session?.started_at
                   ? new Date(session.started_at).toLocaleString("hu-HU")
                   : "—"}
@@ -271,9 +303,9 @@ export default function ChargingPage() {
 
         {/* Zárolt összeg – maximális terhelés */}
         {session?.hold_amount_huf > 0 && (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 px-4 py-3 text-xs text-slate-400 leading-relaxed">
+          <div className="rounded-2xl border border-brand-line bg-white px-4 py-3 text-xs text-ink-soft leading-relaxed">
             Zárolt összeg:{" "}
-            <span className="text-slate-200 font-semibold">
+            <span className="text-ink font-semibold">
               {session.hold_amount_huf.toLocaleString("hu-HU")} Ft
             </span>{" "}
             — legfeljebb ennyi kerülhet levonásra. A töltés végén csak a ténylegesen
@@ -284,18 +316,18 @@ export default function ChargingPage() {
         {/* Stop gomb – inline megerősítéssel */}
         {canStop && !stopConfirm && (
           <button
-            className="btn w-full border-rose-700/60 bg-rose-700/20 text-rose-200 hover:bg-rose-700/40"
+            className="btn w-full border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
             onClick={() => { setStopErr(""); setStopConfirm(true); }}
           >
             Töltés leállítása
           </button>
         )}
         {canStop && stopConfirm && (
-          <div className="rounded-2xl border border-rose-700/60 bg-rose-900/20 px-4 py-4 space-y-3">
-            <div className="text-sm text-rose-200 font-medium">
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 space-y-3">
+            <div className="text-sm text-rose-700 font-medium">
               Biztosan leállítja a töltést?
             </div>
-            {stopErr && <div className="text-sm text-red-400">{stopErr}</div>}
+            {stopErr && <div className="text-sm text-rose-600">{stopErr}</div>}
             <div className="flex gap-2">
               <button
                 className="btn btnGhost flex-1"
@@ -305,7 +337,7 @@ export default function ChargingPage() {
                 Mégse
               </button>
               <button
-                className="btn flex-1 border-rose-700/60 bg-rose-700/30 text-rose-200 hover:bg-rose-700/50"
+                className="btn flex-1 border-rose-300 bg-rose-100 text-rose-700 hover:bg-rose-200"
                 disabled={stopBusy}
                 onClick={doStop}
               >
@@ -317,13 +349,13 @@ export default function ChargingPage() {
 
         {/* Fetch hiba (de már van session) */}
         {fetchErr && (
-          <div className="hint text-xs text-amber-400">
+          <div className="hint">
             Frissítési hiba: {fetchErr}
           </div>
         )}
 
         <div className="text-center pb-6">
-          <a href="/" className="text-sm text-slate-500 hover:text-slate-300 transition">
+          <a href="/" className="text-sm text-ink-muted hover:text-ink transition">
             ← Vissza a töltőkhöz
           </a>
         </div>

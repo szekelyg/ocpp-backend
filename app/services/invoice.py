@@ -79,7 +79,7 @@ async def create_session_invoice(
             bank_account_number=_env("SZAMLAZZ_BANK_ACCOUNT", ""),
             reply_email_address=_env("SZAMLAZZ_REPLY_EMAIL", "szerviz@energiafelho.hu"),
             email_subject=f"Számla – EV töltés (session #{session_id})",
-            email_text="Mellékeljük a töltési session számlájét. Köszönjük, hogy az Energiafelhő hálózatát választotta!",
+            email_text="Mellékeljük a töltési session számlájét. Köszönjük, hogy az Energiafelhő Kft. hálózatát választotta!",
         )
 
         # Vevő neve: cégnév ha céges, egyébként teljes név

@@ -72,7 +72,7 @@ def _wrap(title: str, body: str) -> str:
         <tr>
           <td style="background:#1d4ed8;padding:20px 28px;">
             <span style="font-size:22px;font-weight:700;color:#fff;letter-spacing:-0.5px;">
-              ⚡ Energia Felhő
+              ⚡ Energiafelhő Kft.
             </span>
           </td>
         </tr>
@@ -120,6 +120,32 @@ def _stat(label: str, value: str) -> str:
 # Publikus küldő függvények
 # ---------------------------------------------------------------------------
 
+async def send_login_code_email(to: str, code: str) -> bool:
+    """Bejelentkezési kód (email OTP) – jelszó nélküli belépéshez."""
+    body = f"""
+    <h2 style="margin:0 0 8px;font-size:20px;color:#f1f5f9;">Bejelentkezési kód</h2>
+    <p style="margin:0 0 20px;color:#94a3b8;font-size:14px;">
+      Add meg az alábbi kódot a bejelentkezéshez. A kód <strong style="color:#e2e8f0;">10 percig</strong> érvényes.
+    </p>
+
+    <div style="background:#0f172a;border:1px solid #334155;border-radius:12px;
+                padding:20px;text-align:center;margin-bottom:20px;">
+      <span style="font-size:34px;font-weight:700;letter-spacing:10px;color:#60a5fa;
+                   font-family:'Segoe UI',monospace;">{code}</span>
+    </div>
+
+    <p style="margin:0;font-size:12px;color:#64748b;">
+      Ha nem te kérted ezt a kódot, hagyd figyelmen kívül ezt az emailt – a fiókod biztonságban van.
+      Kártyaadatot soha nem tárolunk.
+    </p>
+    """
+    return await _send(
+        to=to,
+        subject=f"{code} – Bejelentkezési kód · Energiafelhő Kft.",
+        html=_wrap("Bejelentkezési kód", body),
+    )
+
+
 async def send_charging_started_email(
     to: str,
     session_id: int,
@@ -149,7 +175,7 @@ async def send_charging_started_email(
 
     return await _send(
         to=to,
-        subject="⚡ Töltés elindult – Energia Felhő",
+        subject="⚡ Töltés elindult – Energiafelhő Kft.",
         html=_wrap("Töltés elindult", body),
     )
 
@@ -256,7 +282,7 @@ async def send_receipt_email(
     body = f"""
     <h2 style="margin:0 0 8px;font-size:20px;color:#f1f5f9;">Töltés befejezve</h2>
     <p style="margin:0 0 20px;color:#94a3b8;font-size:14px;">
-      Köszönjük, hogy az Energia Felhő hálózatát választotta!
+      Köszönjük, hogy az Energiafelhő Kft. hálózatát választotta!
     </p>
 
     <table cellpadding="0" cellspacing="0"
@@ -281,6 +307,6 @@ async def send_receipt_email(
 
     return await _send(
         to=to,
-        subject="✓ Töltési bizonylat – Energia Felhő",
+        subject="✓ Töltési bizonylat – Energiafelhő Kft.",
         html=_wrap("Töltési bizonylat", body),
     )

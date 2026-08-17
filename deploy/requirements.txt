@@ -1,0 +1,14 @@
+# Pinned to the exact versions running on the Raspberry Pi (pip freeze, 2026-06-11).
+# psycopg[binary] kell az alembic migrációkhoz (alembic/env.py postgresql+psycopg-t használ).
+fastapi==0.121.3
+uvicorn[standard]==0.38.0
+sqlalchemy==2.0.44
+asyncpg==0.30.0
+psycopg[binary]==3.3.2
+alembic==1.17.2
+pydantic==2.12.4
+pydantic-settings==2.12.0
+email-validator==2.3.0
+stripe==14.4.0
+httpx==0.28.1
+szamlazz.py==1.5.1

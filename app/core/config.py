@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     ocpi_enabled: bool = False
     ocpi_country_code: str = "HU"
     ocpi_party_id: str = "ENF"
-    ocpi_business_name: str = "Energiafelhő"
+    ocpi_business_name: str = "Energiafelhő Kft."
     ocpi_business_website: Optional[str] = None
     ocpi_business_logo_url: Optional[str] = None
     ocpi_base_url: Optional[str] = None          # falls back to PUBLIC_BASE_URL

@@ -9,7 +9,13 @@ from sqlalchemy import and_, select
 from app.db.session import AsyncSessionLocal
 from app.db.models import ChargePoint, ChargeSession, MeterSample
 from app.ocpp.time_utils import parse_ocpp_timestamp, utcnow
-from app.ocpp.ocpp_utils import _as_float, _as_int, _pick_measurand_sum, _price_huf_per_kwh
+from app.ocpp.ocpp_utils import (
+    _as_float,
+    _as_int,
+    _pick_measurand_phases,
+    _pick_measurand_sum,
+    _price_huf_per_kwh,
+)
 
 logger = logging.getLogger("ocpp")
 
@@ -109,9 +115,19 @@ async def save_meter_values(cp_id: str, payload: dict) -> None:
                 logger.warning(f"MeterValues: nincs ilyen CP: {cp_id}")
                 return
 
-            active_session_id = await _find_session_id_by_tx(session, cp.id, transaction_id)
-            if active_session_id is None:
-                active_session_id = await _find_active_session_id(session, cp.id, connector_id)
+            # Csak a TÖLTÉSI TRANZAKCIÓHOZ tartozó kereteket kötjük a sessionhöz:
+            #  - van transactionId (a töltő a tranzakcióhoz küldi), VAGY
+            #  - connector >= 1 (konkrét csatlakozó, nem állomás-szintű).
+            # A connector 0 + tranzakció nélküli "Sample.Clock" keretek állomás-szintű
+            # LIFETIME számlálót hordoznak (pl. 161979 Wh) – ezeket NEM szabad a session
+            # energiájához/mintáihoz kötni, különben elrontják az elszámolást és a kW-t.
+            is_session_frame = (transaction_id is not None) or (connector_id is not None and connector_id >= 1)
+
+            active_session_id = None
+            if is_session_frame:
+                active_session_id = await _find_session_id_by_tx(session, cp.id, transaction_id)
+                if active_session_id is None:
+                    active_session_id = await _find_active_session_id(session, cp.id, connector_id)
 
             now_dt = utcnow()
             last_pw = 0.0
@@ -140,6 +156,17 @@ async def save_meter_values(cp_id: str, payload: dict) -> None:
                 last_pw = pw
                 last_ia = ia
 
+                # Fázisonkénti bontás (ha a töltő küldi) – live megjelenítéshez
+                phase_power = _pick_measurand_phases(sampled, "Power.Active.Import")
+                phase_current = _pick_measurand_phases(sampled, "Current.Import")
+                phases = None
+                if phase_power or phase_current:
+                    phases = {}
+                    if phase_power:
+                        phases["power"] = phase_power
+                    if phase_current:
+                        phases["current"] = phase_current
+
                 energy_total = _pick_measurand_sum(
                     sampled, "Energy.Active.Import.Register", default_measurand=True
                 )
@@ -155,26 +182,20 @@ async def save_meter_values(cp_id: str, payload: dict) -> None:
                         energy_wh_total=energy_total,
                         power_w=pw,
                         current_a=ia,
+                        phases=phases,
                         created_at=now_dt,
                     )
                 )
 
-            # live: a ciklus után egyszer frissítjük a session-t a legutóbbi energia értékkel
-            if cs is not None and cs.finished_at is None and last_valid_energy_total is not None:
-                energy_total_f = float(last_valid_energy_total)
-
-                # Ha meter_start_wh=0 (töltő session-relative számlálót küld, meterStart=0-val indult)
-                # és az energia érték > 1000 Wh → ez egy lifetime/abszolút számláló, nem session-relative.
-                # Ilyenkor NEM frissítjük a session energiát – a StopTransaction.meterStop adja a végeredményt
-                # (amely session-relative, tehát meter_start_wh=0 mellett helyesen számolható).
-                if cs.meter_start_wh is not None and float(cs.meter_start_wh) == 0.0 and energy_total_f > 1000:
-                    logger.info(
-                        f"MeterValues: lifetime counter ({energy_total_f:.0f} Wh) meter_start_wh=0 → "
-                        f"élő energia frissítés kihagyva (StopTransaction adja a végeredményt) session_id={cs.id}"
-                    )
-                elif cs.meter_start_wh is not None:
-                    cs.meter_stop_wh = energy_total_f
-                    _recalc_energy_and_cost(cs)
+            # live: a ciklus után egyszer frissítjük a session energiát a legutóbbi
+            # tranzakció-keret regiszter értékével. A connector-0 lifetime órakeretek
+            # ide már nem érnek el (nem session-frame-ek), így nincs szükség a korábbi
+            # ">1000 Wh = lifetime, kihagyjuk" heurisztikára – az fagyasztotta be az
+            # élő energiát (és számolt ~2x kevesebbet) a session-relatív számlálót
+            # küldő töltőknél. Az energia = (regiszter − meterStart), a _recalc végzi.
+            if cs is not None and cs.finished_at is None and last_valid_energy_total is not None and cs.meter_start_wh is not None:
+                cs.meter_stop_wh = float(last_valid_energy_total)
+                _recalc_energy_and_cost(cs)
 
             cp.last_seen_at = now_dt
             if last_pw > 10 or last_ia > 0.1:

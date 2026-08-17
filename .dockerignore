@@ -1,0 +1,14 @@
+# Docker build context = repo root. Ezeket NE másoljuk a buildbe.
+**/node_modules
+**/__pycache__
+**/*.pyc
+.git
+.gitignore
+venv
+frontend/dist
+frontend/src__bak_*
+.env
+.claude
+qr
+*.md
+ocpp_simulator.py

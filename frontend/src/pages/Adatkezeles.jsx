@@ -12,18 +12,18 @@ const HATALYOS = "2026. június 4.";
 function Section({ n, title, children }) {
   return (
     <section className="space-y-2 scroll-mt-20">
-      <h2 className="text-lg font-semibold text-slate-100">
+      <h2 className="text-lg font-semibold text-ink">
         {n}. {title}
       </h2>
-      <div className="space-y-2 text-sm text-slate-300 leading-relaxed">{children}</div>
+      <div className="space-y-2 text-sm text-ink-soft leading-relaxed">{children}</div>
     </section>
   );
 }
 
 function Row({ a, b, c }) {
   return (
-    <tr className="border-t border-slate-800 align-top">
-      <td className="py-2 pr-3 text-slate-200">{a}</td>
+    <tr className="border-t border-brand-line align-top">
+      <td className="py-2 pr-3 text-ink">{a}</td>
       <td className="py-2 pr-3">{b}</td>
       <td className="py-2">{c}</td>
     </tr>
@@ -32,21 +32,21 @@ function Row({ a, b, c }) {
 
 export default function Adatkezeles() {
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+    <div className="min-h-screen flex flex-col">
       <AppHeader />
 
       <main className="mx-auto max-w-3xl w-full px-6 py-8 flex-1 space-y-7">
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">Adatkezelési tájékoztató</h1>
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-ink-soft">
             Az elektromos töltési szolgáltatás adatkezelése (GDPR)
           </p>
-          <p className="text-sm text-slate-500">Hatályos: {HATALYOS}</p>
+          <p className="text-sm text-ink-muted">Hatályos: {HATALYOS}</p>
         </div>
 
-        <p className="text-sm text-slate-300 leading-relaxed">
+        <p className="text-sm text-ink-soft leading-relaxed">
           A jelen tájékoztató az Energiafelhő Kft. által a{" "}
-          <span className="text-slate-100">https://ev.energiafelho.hu</span> oldalon nyújtott
+          <span className="text-ink">https://ev.energiafelho.hu</span> oldalon nyújtott
           elektromos töltési szolgáltatás keretében végzett személyesadat-kezelésről
           tájékoztatja az érintetteket, az Európai Parlament és a Tanács (EU) 2016/679
           rendelete (GDPR) és az információs önrendelkezési jogról szóló 2011. évi CXII.
@@ -55,11 +55,11 @@ export default function Adatkezeles() {
 
         <Section n="1" title="Az adatkezelő">
           <ul className="space-y-1">
-            <li>Cégnév: <span className="text-slate-100">Energiafelhő Kft.</span></li>
-            <li>Székhely: <span className="text-slate-100">1147 Budapest, Ilosvai Selymes utca 127. fszt. 2.</span></li>
-            <li>Cégjegyzékszám: <span className="text-slate-100">01-09-953931</span></li>
-            <li>Adószám: <span className="text-slate-100">23120635-2-42</span></li>
-            <li>E-mail: <a className="text-blue-400" href="mailto:szerviz@energiafelho.hu">szerviz@energiafelho.hu</a></li>
+            <li>Cégnév: <span className="text-ink">Energiafelhő Kft.</span></li>
+            <li>Székhely: <span className="text-ink">1147 Budapest, Ilosvai Selymes utca 127. fszt. 2.</span></li>
+            <li>Cégjegyzékszám: <span className="text-ink">01-09-953931</span></li>
+            <li>Adószám: <span className="text-ink">23120635-2-42</span></li>
+            <li>E-mail: <a className="text-brand-action hover:underline" href="mailto:szerviz@energiafelho.hu">szerviz@energiafelho.hu</a></li>
           </ul>
           <p>Az adatkezelő adatvédelmi tisztviselő kijelölésére nem köteles, és ilyet nem jelölt ki.</p>
         </Section>
@@ -78,7 +78,7 @@ export default function Adatkezeles() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left text-slate-400">
+                <tr className="text-left text-ink-soft">
                   <th className="py-1.5 pr-3 font-medium">Cél</th>
                   <th className="py-1.5 pr-3 font-medium">Jogalap (GDPR)</th>
                   <th className="py-1.5 font-medium">Időtartam</th>
@@ -114,21 +114,21 @@ export default function Adatkezeles() {
           <p>Az adatkezelő a szolgáltatás nyújtásához az alábbi adatfeldolgozókat veszi igénybe:</p>
           <ul className="list-disc pl-6 space-y-1.5">
             <li>
-              <span className="text-slate-100">Stripe Payments Europe, Ltd.</span> (1 Grand Canal
+              <span className="text-ink">Stripe Payments Europe, Ltd.</span> (1 Grand Canal
               Street Lower, Grand Canal Dock, Dublin, Írország) – online bankkártyás fizetés
               feldolgozása. A kártyaadatokat kizárólag a Stripe kezeli.
             </li>
             <li>
-              <span className="text-slate-100">KBOSS.hu Kft. (Számlázz.hu)</span> (1031 Budapest,
+              <span className="text-ink">KBOSS.hu Kft. (Számlázz.hu)</span> (1031 Budapest,
               Záhony utca 7.) – elektronikus számla kiállítása és kézbesítése.
             </li>
             <li>
-              <span className="text-slate-100">Resend, Inc.</span> (USA) – a szolgáltatáshoz
+              <span className="text-ink">Resend, Inc.</span> (USA) – a szolgáltatáshoz
               kapcsolódó e-mailek (értesítők, bizonylatok) kézbesítése. Az Egyesült Államokba
               irányuló adattovábbítás a GDPR szerinti megfelelő garanciák mellett történik.
             </li>
             <li>
-              <span className="text-slate-100">Cloudflare, Inc.</span> (101 Townsend Street, San
+              <span className="text-ink">Cloudflare, Inc.</span> (101 Townsend Street, San
               Francisco, CA 94107, USA) – tárhely-/infrastruktúra-szolgáltatás, a forgalom
               továbbítása és biztonsága. Az Egyesült Államokba irányuló adattovábbítás a GDPR
               szerinti megfelelő garanciák mellett történik.
@@ -161,7 +161,7 @@ export default function Adatkezeles() {
           </ul>
           <p>
             Az érintett a jogait az{" "}
-            <a className="text-blue-400" href="mailto:szerviz@energiafelho.hu">szerviz@energiafelho.hu</a>{" "}
+            <a className="text-brand-action hover:underline" href="mailto:szerviz@energiafelho.hu">szerviz@energiafelho.hu</a>{" "}
             címen gyakorolhatja. Az adatkezelő a kérelmet indokolatlan késedelem nélkül, de
             legkésőbb 1 hónapon belül teljesíti.
           </p>
@@ -175,8 +175,8 @@ export default function Adatkezeles() {
           <ul className="space-y-0.5">
             <li>Cím: 1055 Budapest, Falk Miksa utca 9-11.</li>
             <li>Postacím: 1363 Budapest, Pf. 9.</li>
-            <li>E-mail: <a className="text-blue-400" href="mailto:ugyfelszolgalat@naih.hu">ugyfelszolgalat@naih.hu</a></li>
-            <li>Web: <a className="text-blue-400" href="https://naih.hu" target="_blank" rel="noreferrer">naih.hu</a></li>
+            <li>E-mail: <a className="text-brand-action hover:underline" href="mailto:ugyfelszolgalat@naih.hu">ugyfelszolgalat@naih.hu</a></li>
+            <li>Web: <a className="text-brand-action hover:underline" href="https://naih.hu" target="_blank" rel="noreferrer">naih.hu</a></li>
           </ul>
           <p>Az érintett a jogainak megsértése esetén bírósághoz is fordulhat.</p>
         </Section>
@@ -198,10 +198,10 @@ export default function Adatkezeles() {
         </Section>
 
         <div className="pt-2 flex flex-wrap gap-4">
-          <a href="/aszf" className="text-sm text-slate-500 hover:text-slate-300 transition">
+          <a href="/aszf" className="text-sm text-ink-muted hover:text-ink transition">
             ÁSZF
           </a>
-          <a href="/" className="text-sm text-slate-500 hover:text-slate-300 transition">
+          <a href="/" className="text-sm text-ink-muted hover:text-ink transition">
             ← Vissza a főoldalra
           </a>
         </div>

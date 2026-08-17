@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import StatusBadge from "../ui/StatusBadge";
 import { placeLines, timeAgo } from "../../utils/format";
 import PayModal from "../ui/PayModal";
+import LoginAutofill, { AUTH_TOKEN_KEY } from "../ui/LoginAutofill";
 
 const STARTABLE = new Set(["available", "preparing", "finishing"]);
 
@@ -22,13 +23,13 @@ const HOLD_OPTIONS = [
 function Field({ label, children }) {
   return (
     <div>
-      <label className="block text-xs text-slate-400 mb-1.5">{label}</label>
+      <label className="block text-xs text-ink-soft mb-1.5">{label}</label>
       {children}
     </div>
   );
 }
 
-const inputCls = "w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-slate-100 outline-none focus:ring-2 focus:ring-blue-500/40 text-sm disabled:opacity-50";
+const inputCls = "field";
 
 export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, onAutoOpenDone, compact = false }) {
   const [email, setEmail] = useState("");
@@ -49,8 +50,48 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
   const [err, setErr] = useState("");
   const [minAck, setMinAck] = useState(false);
 
+  // "Adataim mentése legközelebbre" pipa (regisztráció). Kártyaadatot SOHA nem mentünk.
+  const [saveProfile, setSaveProfile] = useState(false);
+
   const lines = useMemo(() => (cp ? placeLines(cp) : ["", ""]), [cp]);
   const canStart = cp && isStartable(cp.status) && !busy;
+
+  // Mentett számlázási profil betöltése az űrlapba.
+  const applyProfile = useCallback((profile, loginEmail) => {
+    if (loginEmail) setEmail(loginEmail);
+    if (!profile) return;
+    if (profile.email) setEmail(profile.email);
+    if (profile.billing_type) setBillingType(profile.billing_type);
+    if (profile.billing_name) setBillingName(profile.billing_name);
+    if (profile.billing_street) setBillingStreet(profile.billing_street);
+    if (profile.billing_zip) setBillingZip(profile.billing_zip);
+    if (profile.billing_city) setBillingCity(profile.billing_city);
+    if (profile.billing_country) setBillingCountry(profile.billing_country);
+    if (profile.billing_company) setBillingCompany(profile.billing_company);
+    if (profile.billing_tax_number) setBillingTaxNumber(profile.billing_tax_number);
+  }, []);
+
+  // Ha van érvényes token (korábbi belépés), automatikusan előtöltjük az adatokat.
+  useEffect(() => {
+    let token = "";
+    try { token = localStorage.getItem(AUTH_TOKEN_KEY) || ""; } catch { /* ignore */ }
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/profile", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.status === 401) {
+          try { localStorage.removeItem(AUTH_TOKEN_KEY); } catch { /* ignore */ }
+          return;
+        }
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled && res.ok && data?.profile) applyProfile(data.profile, data.profile.email);
+      } catch { /* offline / hiba – néma */ }
+    })();
+    return () => { cancelled = true; };
+  }, [applyProfile]);
 
   useEffect(() => {
     if (!autoOpenModal || !cp) return;
@@ -63,7 +104,7 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
 
   if (!cp) {
     return (
-      <div className="text-slate-500 text-sm text-center py-4">
+      <div className="text-ink-muted text-sm text-center py-4">
         Válasszon töltőt a listából vagy a térképről.
       </div>
     );
@@ -118,6 +159,7 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
           billing_country: billingCountry.trim().toUpperCase(),
           billing_company: billingType === "business" ? billingCompany.trim() : null,
           billing_tax_number: billingType === "business" ? billingTaxNumber.trim() : null,
+          save_profile: saveProfile,
         }),
       });
 
@@ -150,13 +192,13 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
       {!compact && (
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="font-semibold text-slate-100 leading-tight">
+            <div className="font-semibold text-ink leading-tight">
               {lines[0] || cp.ocpp_id || "—"}
             </div>
             {lines[1] && (
-              <div className="text-sm text-slate-400 mt-0.5">{lines[1]}</div>
+              <div className="text-sm text-ink-soft mt-0.5">{lines[1]}</div>
             )}
-            <div className="text-xs text-slate-500 mt-1">
+            <div className="text-xs text-ink-muted mt-1">
               Aktív: {timeAgo(cp.last_seen_at)}
             </div>
           </div>
@@ -168,15 +210,15 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
       {(cp.connector_type || cp.max_power_kw) && (
         <div className="flex flex-wrap gap-2">
           {cp.connector_type && (
-            <span className="inline-flex items-center gap-1 rounded-lg bg-slate-800 border border-slate-700 px-2.5 py-1 text-xs text-slate-300">
-              <span className="text-slate-500">Csatlakozó</span>
-              <span className="font-medium text-slate-100">{cp.connector_type}</span>
+            <span className="chip">
+              <span className="text-ink-muted">Csatlakozó</span>
+              <span className="font-semibold text-ink">{cp.connector_type}</span>
             </span>
           )}
           {cp.max_power_kw && (
-            <span className="inline-flex items-center gap-1 rounded-lg bg-slate-800 border border-slate-700 px-2.5 py-1 text-xs text-slate-300">
-              <span className="text-slate-500">Max. teljesítmény</span>
-              <span className="font-medium text-slate-100">{cp.max_power_kw} kW</span>
+            <span className="chip">
+              <span className="text-ink-muted">Max. teljesítmény</span>
+              <span className="font-semibold text-ink">{cp.max_power_kw} kW</span>
             </span>
           )}
         </div>
@@ -184,22 +226,22 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
 
       {/* Állapot tájékoztató */}
       {statusStr === "available" && (
-        <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-3 text-xs text-slate-400">
+        <div className="rounded-xl bg-brand-panel p-3 text-xs text-ink-soft">
           A töltő szabad és használatra kész. Fizetés után csatlakoztassa az autót.
         </div>
       )}
       {(statusStr === "preparing" || statusStr === "finishing") && (
-        <div className="rounded-xl border border-amber-800/40 bg-amber-950/20 p-3 text-xs text-amber-300">
+        <div className="hint">
           Az autó már csatlakoztatva van — fizetés után a töltés azonnal elindul.
         </div>
       )}
       {statusStr === "charging" && (
-        <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-3 text-xs text-slate-400">
+        <div className="rounded-xl bg-brand-panel p-3 text-xs text-ink-soft">
           Ez a töltő jelenleg foglalt. Kérjük válasszon másik állomást.
         </div>
       )}
       {!["available", "preparing", "finishing", "charging"].includes(statusStr) && (
-        <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-3 text-xs text-slate-400">
+        <div className="rounded-xl bg-brand-panel p-3 text-xs text-ink-soft">
           A töltés indítása jelenleg nem lehetséges ezen az állomáson.
         </div>
       )}
@@ -228,8 +270,8 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
 
       {/* Fizetési modal */}
       <PayModal open={showPay} busy={busy} onClose={closeModal}>
-        <div className="text-slate-100 font-semibold text-base">Töltés indítása</div>
-        <div className="mt-1 text-slate-400 text-sm">
+        <div className="text-ink font-semibold text-base">Töltés indítása</div>
+        <div className="mt-1 text-ink-soft text-sm">
           {isCarConnected(cp.status)
             ? "Az autó már csatlakoztatva van — fizetés után a töltés azonnal elindul."
             : "Fizetés után csatlakoztassa az autót a töltőhöz."}
@@ -237,21 +279,21 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
 
         {/* Ár kiemelés */}
         {cp.price_huf_per_kwh > 0 && (
-          <div className="mt-3 rounded-xl border border-emerald-700/40 bg-emerald-950/30 px-3 py-2.5 flex items-center justify-between">
+          <div className="mt-3 rounded-xl border border-brand-green/40 bg-[#e6faf4] px-3 py-2.5 flex items-center justify-between">
             <div>
-              <div className="text-xs text-emerald-400/70 mb-0.5">Töltési díj</div>
-              <div className="text-lg font-bold text-emerald-300">
-                {cp.price_huf_per_kwh.toLocaleString("hu-HU")} Ft<span className="text-sm font-normal text-emerald-400/70">/kWh</span>
+              <div className="text-xs text-[#037a5c]/70 mb-0.5">Töltési díj</div>
+              <div className="text-lg font-bold text-[#037a5c]">
+                {cp.price_huf_per_kwh.toLocaleString("hu-HU")} Ft<span className="text-sm font-normal text-[#037a5c]/70">/kWh</span>
               </div>
-              <div className="text-xs text-emerald-400/50 mt-0.5">bruttó, 27% ÁFÁ-val</div>
+              <div className="text-xs text-[#037a5c]/60 mt-0.5">bruttó, 27% ÁFÁ-val</div>
             </div>
             {cp.min_charge_huf > 0 && (
               <div className="text-right">
-                <div className="text-xs text-emerald-400/70 mb-0.5">Minimum terhelés</div>
-                <div className="text-base font-semibold text-emerald-200">
+                <div className="text-xs text-[#037a5c]/70 mb-0.5">Minimum terhelés</div>
+                <div className="text-base font-semibold text-[#037a5c]">
                   {cp.min_charge_huf.toLocaleString("hu-HU")} Ft
                 </div>
-                <div className="text-xs text-emerald-400/50 mt-0.5">
+                <div className="text-xs text-[#037a5c]/60 mt-0.5">
                   ≈ {((cp.min_charge_huf / cp.price_huf_per_kwh)).toFixed(2).replace(".", ",")} kWh
                 </div>
               </div>
@@ -260,17 +302,17 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
         )}
 
         {/* Hold magyarázat */}
-        <div className="mt-3 rounded-xl border border-blue-800/40 bg-blue-950/30 px-3 py-2.5 space-y-1.5">
-          <div className="text-xs font-semibold text-blue-300">Hogyan működik a fizetés?</div>
-          <div className="text-xs text-blue-200/70">
-            A kártyádon <span className="font-semibold text-blue-200">csak zárolásra kerül</span> a
+        <div className="mt-3 rounded-xl border border-brand-blue/40 bg-brand-panel px-3 py-2.5 space-y-1.5">
+          <div className="text-xs font-semibold text-brand-action">Hogyan működik a fizetés?</div>
+          <div className="text-xs text-ink-soft">
+            A kártyádon <span className="font-semibold text-ink">csak zárolásra kerül</span> a
             választott összeg — tényleges terhelés nem történik. A töltés végén kizárólag a
             felhasznált energia díja kerül levonásra; a maradék zárolás automatikusan felszabadul.
           </div>
-          <div className="text-xs text-blue-200/50 pt-0.5 border-t border-blue-800/30">
-            Ha nem töltöttél semmit, <span className="text-blue-200/70">0 Ft kerül levonásra</span>.
+          <div className="text-xs text-ink-muted pt-0.5 border-t border-brand-blue/30">
+            Ha nem töltöttél semmit, <span className="text-ink-soft">0 Ft kerül levonásra</span>.
             {cp.min_charge_huf > 0 && (
-              <> A bankkártyás feldolgozás minimuma <span className="text-blue-200/70 font-semibold">{cp.min_charge_huf.toLocaleString("hu-HU")} Ft</span> — nagyon rövid töltésnél is legalább ennyi kerül levonásra.</>
+              <> A bankkártyás feldolgozás minimuma <span className="text-ink-soft font-semibold">{cp.min_charge_huf.toLocaleString("hu-HU")} Ft</span> — nagyon rövid töltésnél is legalább ennyi kerül levonásra.</>
             )}
           </div>
         </div>
@@ -283,11 +325,11 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
               checked={minAck}
               onChange={(e) => setMinAck(e.target.checked)}
               disabled={busy}
-              className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-800 accent-blue-500 cursor-pointer shrink-0"
+              className="mt-0.5 h-4 w-4 rounded border-brand-line accent-brand-action cursor-pointer shrink-0"
             />
-            <span className="text-xs text-slate-300 leading-relaxed">
+            <span className="text-xs text-ink-soft leading-relaxed">
               Tudomásul veszem, hogy a bankkártyás feldolgozás minimuma{" "}
-              <span className="font-semibold text-white">
+              <span className="font-semibold text-ink">
                 {cp.min_charge_huf.toLocaleString("hu-HU")} Ft
               </span>
               {cp.price_huf_per_kwh > 0 && (
@@ -300,8 +342,17 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
 
         {/* ── SZÁMLÁZÁSI ADATOK ── */}
         <div className="mt-5">
-          <div className="text-xs font-semibold text-slate-300 uppercase tracking-wide mb-3">
+          <div className="kicker mb-3">
             Számlázási adatok
+          </div>
+
+          {/* Belépés mentett adatokkal (email kód) – automatikus kitöltés */}
+          <div className="mb-4">
+            <LoginAutofill
+              defaultEmail={email}
+              disabled={busy}
+              onLoggedIn={(profile, loginEmail) => applyProfile(profile, loginEmail)}
+            />
           </div>
 
           {/* Számla típusa */}
@@ -318,8 +369,8 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
                 className={[
                   "rounded-xl border py-2.5 text-sm font-semibold transition",
                   billingType === opt.value
-                    ? "border-blue-500 bg-blue-600/30 text-blue-200"
-                    : "border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-600",
+                    ? "border-brand-action bg-brand-action/10 text-brand-action"
+                    : "border-brand-line bg-white text-ink-soft hover:border-brand-blue/60",
                 ].join(" ")}
               >
                 {opt.label}
@@ -417,7 +468,7 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
 
         {/* ── ZÁROLÁSI ÖSSZEG ── */}
         <div className="mt-5">
-          <div className="text-xs font-semibold text-slate-300 uppercase tracking-wide mb-3">
+          <div className="kicker mb-3">
             Zárolási keret
           </div>
           <div className="grid grid-cols-3 gap-2">
@@ -430,22 +481,22 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
                 className={[
                   "rounded-xl border py-2.5 text-sm font-semibold transition",
                   holdAmount === opt.value
-                    ? "border-blue-500 bg-blue-600/30 text-blue-200"
-                    : "border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-600",
+                    ? "border-brand-action bg-brand-action/10 text-brand-action"
+                    : "border-brand-line bg-white text-ink-soft hover:border-brand-blue/60",
                 ].join(" ")}
               >
                 {opt.label}
               </button>
             ))}
           </div>
-          <div className="mt-1.5 text-xs text-slate-500">
+          <div className="mt-1.5 text-xs text-ink-muted">
             Hosszabb töltéshez válasszon nagyobb keretet. A tényleges levonás ettől független.
           </div>
         </div>
 
         {/* ── EMAIL ── */}
         <div className="mt-5">
-          <div className="text-xs font-semibold text-slate-300 uppercase tracking-wide mb-3">
+          <div className="kicker mb-3">
             Kapcsolat
           </div>
           <Field label="Email-cím — ide érkezik az értesítő és a számla">
@@ -458,9 +509,24 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
               type="email"
             />
           </Field>
+
+          {/* Adatok mentése legközelebbre (regisztráció) */}
+          <label className="mt-3 flex items-start gap-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={saveProfile}
+              onChange={(e) => setSaveProfile(e.target.checked)}
+              disabled={busy}
+              className="mt-0.5 h-4 w-4 rounded border-brand-line accent-brand-action cursor-pointer shrink-0"
+            />
+            <span className="text-xs text-ink-soft leading-relaxed">
+              Számlázási adataim mentése a következő alkalomra. Legközelebb elég belépned az
+              email-címeddel — a kártyaadataidat <span className="font-semibold text-ink">soha nem tároljuk</span>.
+            </span>
+          </label>
         </div>
 
-        {err && <div className="mt-3 text-sm text-red-400">{err}</div>}
+        {err && <div className="mt-3 text-sm text-rose-600">{err}</div>}
 
         <div className="mt-5 flex gap-2 justify-end">
           <button type="button" className="btn btnGhost" onClick={closeModal} disabled={busy}>

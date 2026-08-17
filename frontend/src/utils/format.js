@@ -21,9 +21,8 @@ export function timeAgo(dtIso) {
   }
   
   export function placeLines(cp) {
-    const addr = (cp?.address_text || "").trim();
-    if (addr) return [addr];
     const name = (cp?.location_name || "").trim();
-    if (name) return [name];
-    return ["—"];
+    const addr = (cp?.address_text || "").trim();
+    const lines = [name, addr].filter(Boolean);
+    return lines.length ? lines : ["—"];
   }

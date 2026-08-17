@@ -1,0 +1,54 @@
+# OCPP backend – teljes stack egy VPS-en.
+# Indítás a deploy/ mappából:  docker compose up -d --build
+#
+# DB opciók:
+#   A) helyi Postgres konténer (alapértelmezett, lent a `db` service) – egyszerű, gyors, nincs külső függőség
+#   B) Neon / külső menedzselt Postgres – kommenteld ki a `db` service-t és a backend depends_on-t,
+#      a .env-ben a DATABASE_URL-t állítsd a Neon connection stringre (?sslmode=require kell)
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ocppuser
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ocpp
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ocppuser -d ocpp"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    # Nincs publikus port – csak a Caddy éri el a belső hálón.
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

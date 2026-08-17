@@ -1,0 +1,32 @@
+# Caddy a Docker compose-ban fut. A backend a belső hálón "backend:8000" néven érhető el.
+# A backend MAGA szolgálja ki a frontendet is (SPA fallback + /assets a main.py-ban),
+# ezért minden domain egyszerűen a backendre proxyzik – nincs külön file_server.
+#
+# Minden az energiafelho.hu alatt fut (a napos.hu megszűnik).
+#
+# !!! DNS: mindkét domain A rekordja az új VPS publikus IP-jére mutasson.
+#     - ocpp.energiafelho.hu -> KÖTELEZŐEN közvetlenül a VPS-re (Cloudflare "DNS only"/szürke
+#       felhő), mert a töltők ws/wss-en csatlakoznak, a Cloudflare proxy ezt elrontaná.
+#       Auto Let's Encrypt cert készül hozzá (port 80 elérhető kell legyen az ACME-hez).
+#     - ev.energiafelho.hu -> lehet Cloudflare proxy mögött is (lásd lent).
+
+# --- Frontend + API (HTTPS, automatikus Let's Encrypt cert) ---
+ev.energiafelho.hu {
+	# Ha Cloudflare PROXY (narancs felhő) mögött marad: cseréld a `reverse_proxy` alatti
+	# sort `tls internal`-ra, és a Cloudflare SSL módja legyen "Full".
+	# Ha közvetlenül a VPS-re mutat (szürke felhő): hagyd így, auto Let's Encrypt lesz.
+	reverse_proxy backend:8000
+}
+
+# --- OCPP töltő-kapcsolatok, HTTPS/wss (auto Let's Encrypt) – AJÁNLOTT ---
+# A töltőkben:  wss://ocpp.energiafelho.hu/ocpp/<charge_point_id>
+ocpp.energiafelho.hu {
+	reverse_proxy backend:8000
+}
+
+# --- OCPP töltő-kapcsolatok, sima HTTP/ws (port 80, NINCS TLS redirect) ---
+# Csak ha egy töltő nem tud wss-t:  ws://ocpp.energiafelho.hu/ocpp/<charge_point_id>
+# Az explicit http:// blokk kikapcsolja az automatikus 80->443 átirányítást erre a hostra.
+http://ocpp.energiafelho.hu {
+	reverse_proxy backend:8000
+}

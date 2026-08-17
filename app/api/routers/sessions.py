@@ -37,14 +37,74 @@ def _duration_s(s: ChargeSession) -> Optional[int]:
 
 
 async def _get_latest_power_w(db: AsyncSession, session_id: int) -> Optional[float]:
+    """Pillanatnyi töltési teljesítmény (W).
+
+    Elsődlegesen a töltő által jelentett Power.Active.Import-ot használjuk. Sok töltő
+    (pl. a Voltie) viszont töltés közben NEM küld pillanatnyi teljesítményt, csak
+    kumulált energia-számlálót – ilyenkor a teljesítményt az utolsó néhány minta
+    energia-különbségéből számoljuk (ΔWh / Δidő).
+    """
     res = await db.execute(
-        select(MeterSample.power_w)
-        .where(MeterSample.session_id == session_id, MeterSample.power_w.isnot(None))
+        select(MeterSample.ts, MeterSample.power_w, MeterSample.energy_wh_total)
+        .where(MeterSample.session_id == session_id)
+        .order_by(desc(MeterSample.ts))
+        .limit(4)
+    )
+    rows = res.all()
+    if not rows:
+        return None
+
+    # 1) Ha a töltő valós pillanatnyi teljesítményt küld, azt használjuk.
+    latest_pw = rows[0][1]
+    if latest_pw is not None and latest_pw > 10:
+        return round(float(latest_pw), 1)
+
+    # 2) Származtatás energia-deltából: legújabb vs. az ablak legrégebbi mintája.
+    newest_ts, _, newest_e = rows[0]
+    oldest_ts, _, oldest_e = rows[-1]
+    if newest_e is not None and oldest_e is not None:
+        dt_s = (newest_ts - oldest_ts).total_seconds()
+        d_wh = float(newest_e) - float(oldest_e)
+        if dt_s >= 2 and d_wh >= 0:
+            watts = d_wh / dt_s * 3600.0
+            if 0 <= watts < 400_000:  # épp ész-szintű felső korlát
+                return round(watts, 1)
+
+    return round(float(latest_pw), 1) if latest_pw is not None else None
+
+
+async def _get_latest_phases(db: AsyncSession, session_id: int) -> Optional[dict]:
+    """A legutóbbi minta fázisonkénti bontása + hány fázison folyik a töltés.
+
+    { "list": [{"name":"L1","power_w":..,"current_a":..,"active":true}, ...],
+      "active_count": N }
+    """
+    res = await db.execute(
+        select(MeterSample.phases)
+        .where(MeterSample.session_id == session_id, MeterSample.phases.isnot(None))
         .order_by(desc(MeterSample.ts))
         .limit(1)
     )
-    row = res.scalar_one_or_none()
-    return row
+    ph = res.scalar_one_or_none()
+    if not ph:
+        return None
+
+    power = ph.get("power") or {}
+    current = ph.get("current") or {}
+    names = sorted(set(power) | set(current))
+    if not names:
+        return None
+
+    lst = []
+    active = 0
+    for n in names:
+        p = power.get(n)
+        c = current.get(n)
+        is_active = (c is not None and c >= 1.0) or (p is not None and p >= 50.0)
+        if is_active:
+            active += 1
+        lst.append({"name": n, "power_w": p, "current_a": c, "active": is_active})
+    return {"list": lst, "active_count": active}
 
 
 def _session_to_dict(
@@ -52,6 +112,7 @@ def _session_to_dict(
     cp: Optional[ChargePoint] = None,
     power_w: Optional[float] = None,
     hold_amount_huf: Optional[int] = None,
+    phases: Optional[dict] = None,
 ) -> dict:
     result: dict = {
         "id": s.id,
@@ -71,6 +132,7 @@ def _session_to_dict(
         "price_huf_per_kwh": _price_huf_per_kwh(),
         "min_charge_huf": MIN_CHARGE_HUF,
         "hold_amount_huf": hold_amount_huf,
+        "phases": phases,
     }
     if cp is not None:
         result["charge_point"] = {
@@ -284,8 +346,9 @@ async def get_session(
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
     power_w = await _get_latest_power_w(db, s.id) if s.finished_at is None else None
+    phases = await _get_latest_phases(db, s.id) if s.finished_at is None else None
     hold = s.intent.hold_amount_huf if s.intent else None
-    return _session_to_dict(s, s.charge_point, power_w=power_w, hold_amount_huf=hold)
+    return _session_to_dict(s, s.charge_point, power_w=power_w, hold_amount_huf=hold, phases=phases)
 
 
 @router.post("/{session_id}/stop", response_model=dict)

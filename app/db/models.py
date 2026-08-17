@@ -230,6 +230,10 @@ class MeterSample(Base):
     power_w = Column(Float, nullable=True)
     current_a = Column(Float, nullable=True)
 
+    # Fázisonkénti bontás, ha a töltő küldi (MeterValuesSampledData-tól függ):
+    #   {"power": {"L1": .., "L2": .., "L3": ..}, "current": {"L1": .., ...}}
+    phases = Column(JSON, nullable=True)
+
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
     charge_point = relationship("ChargePoint", back_populates="samples")
@@ -382,4 +386,49 @@ class OcpiTariff(Base):
     max_price = Column(JSON, nullable=True)
 
     last_updated = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class User(Base):
+    """Visszatérő felhasználó – jelszó NÉLKÜLI (email OTP / magic-code) fiók.
+
+    Kizárólag a SZÁMLÁZÁSI profilt tároljuk, hogy legközelebb ne kelljen újra
+    beírni. Kártyaadat SOHA nem kerül ide – az mindig a Stripe-nál marad.
+    Az emailhez kötött; a bejelentkezés email-kóddal történik (lásd LoginCode).
+    """
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), nullable=False, unique=True, index=True)
+
+    # Mentett számlázási profil (ugyanazok a mezők, mint a ChargingIntent-en)
+    billing_type = Column(String(16), nullable=True)          # "personal" | "business"
+    billing_name = Column(String(255), nullable=True)
+    billing_street = Column(String(255), nullable=True)
+    billing_zip = Column(String(16), nullable=True)
+    billing_city = Column(String(128), nullable=True)
+    billing_country = Column(String(4), nullable=True)
+    billing_company = Column(String(255), nullable=True)      # csak business
+    billing_tax_number = Column(String(64), nullable=True)    # csak business
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class LoginCode(Base):
+    """Egyszer használatos bejelentkezési kód (email OTP).
+
+    A nyers kódot SOHA nem tároljuk, csak a sózott hash-ét. Lejárat + próbálkozás-
+    korlát véd a brute-force ellen. Sikeres verifikáláskor consumed_at-et állítunk.
+    """
+    __tablename__ = "login_codes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), nullable=False, index=True)
+
+    code_hash = Column(String(64), nullable=False)            # sha256 hex (sózott)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    consumed_at = Column(DateTime(timezone=True), nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
+
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)

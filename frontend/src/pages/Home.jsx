@@ -6,6 +6,13 @@ import AppFooter from "../components/ui/AppFooter";
 import MapView from "../components/map/MapView";
 import ChargerList from "../components/chargers/ChargerList";
 import ChargerToolbar from "../components/chargers/ChargerToolbar";
+import FaqSection from "../components/ui/FaqSection";
+
+const STEPS = [
+  ["stepDot1", "Válasszon töltőt", "vagy olvassa be a QR-kódot az állomáson"],
+  ["stepDot2", "Indítsa el a töltést online", "bankkártyás fizetéssel, regisztráció nélkül"],
+  ["stepDot3", "Csatlakoztassa az autót", "a töltés automatikusan elindul"],
+];
 
 const REFRESH_MS = 5000;
 
@@ -87,6 +94,18 @@ export default function Home() {
     return filtered.find((x) => x.id === expandedId) || null;
   }, [filtered, expandedId]);
 
+  // Egységes ár-információ a kiemelt ár-kártyához
+  const priceInfo = useMemo(() => {
+    const prices = [...new Set((items || []).filter((x) => x.price_huf_per_kwh > 0).map((x) => x.price_huf_per_kwh))];
+    const mins = [...new Set((items || []).filter((x) => x.min_charge_huf > 0).map((x) => x.min_charge_huf))];
+    if (!prices.length) return null;
+    return {
+      uniform: prices.length === 1,
+      price: Math.min(...prices),
+      minCharge: mins.length === 1 ? mins[0] : null,
+    };
+  }, [items]);
+
   // Ha a kiválasztott töltő kiszűrődik, töröljük az expandot
   useEffect(() => {
     if (expandedId != null && !filtered.some((x) => x.id === expandedId)) {
@@ -128,24 +147,53 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+    <div className="min-h-screen flex flex-col">
       <AppHeader />
 
       <div className="mx-auto max-w-7xl w-full p-6 space-y-6 flex-1">
 
+        {/* HERO */}
+        <div className="card">
+          <div className="cardBody md:flex md:items-center md:justify-between gap-8">
+            <div className="max-w-xl">
+              <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-ink leading-tight">
+                Töltse autóját{" "}
+                <span className="text-brand-action">regisztráció nélkül</span>
+              </h1>
+              <p className="mt-2 text-sm md:text-base text-ink-soft">
+                Olvassa be a QR-kódot az állomáson vagy válasszon töltőt a térképről —
+                bankkártyás fizetés után azonnal indul a töltés. Nincs applikáció,
+                nincs előzetes regisztráció.
+              </p>
+            </div>
+            <div className="mt-5 md:mt-0 flex flex-col gap-3 shrink-0">
+              {STEPS.map(([dot, title, sub], i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className={`stepDot ${dot}`}>{i + 1}</span>
+                  <span className="leading-tight">
+                    <span className="block text-sm font-semibold text-ink">{title}</span>
+                    <span className="block text-xs text-ink-muted">{sub}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="accentLine" />
+        </div>
+
         {error && (
-          <div className="rounded-2xl border border-red-900/50 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+          <div className="errorBanner">
             Nem sikerült betölteni a töltők adatait. Kérjük próbálja újra.
           </div>
         )}
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           {/* TÉRKÉP */}
-          <div className="xl:col-span-2 bg-slate-900 rounded-2xl shadow overflow-hidden flex flex-col border border-slate-800">
-            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+          <div className="xl:col-span-2 card flex flex-col">
+            <div className="cardHeader flex items-center justify-between">
               <div>
-                <div className="font-semibold text-slate-100">Töltőállomások térképe</div>
-                <div className="text-xs text-slate-400 mt-0.5">
+                <div className="cardTitle">Töltőállomások térképe</div>
+                <div className="cardSub mt-0.5">
                   {filtered.length === 0
                     ? "Nincs találat"
                     : `${filtered.length} állomás`}
@@ -153,8 +201,8 @@ export default function Home() {
               </div>
               {loading && (
                 <div className="flex gap-1">
-                  {[0, 1, 2].map((i) => (
-                    <div key={i} className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce"
+                  {["bg-brand-yellow", "bg-brand-blue", "bg-brand-green"].map((c, i) => (
+                    <div key={i} className={`w-1.5 h-1.5 rounded-full animate-bounce ${c}`}
                       style={{ animationDelay: `${i * 0.15}s` }} />
                   ))}
                 </div>
@@ -173,11 +221,42 @@ export default function Home() {
 
           {/* JOBB OSZLOP */}
           <div className="space-y-5">
+            {/* ÁR-KÁRTYA */}
+            {priceInfo && (
+              <div className="card">
+                <div className="cardBody flex items-start justify-between gap-3">
+                  <div>
+                    <div className="kicker">Töltési díj</div>
+                    <div className="mt-1 text-3xl font-extrabold text-ink">
+                      {priceInfo.price.toLocaleString("hu-HU")} Ft
+                      <span className="text-base font-semibold text-ink-muted">/kWh</span>
+                      {!priceInfo.uniform && (
+                        <span className="text-base font-semibold text-ink-muted">-tól</span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 text-xs text-ink-muted">
+                      bruttó, 27% ÁFÁ-val{priceInfo.uniform ? " · minden állomáson" : " · állomásonként eltérhet"}
+                    </div>
+                  </div>
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#e6faf4] text-lg">
+                    ⚡
+                  </span>
+                </div>
+                <div className="px-5 pb-4 text-xs text-ink-soft">
+                  Fizetéskor csak zárolás történik a kártyán — a töltés végén kizárólag a
+                  felhasznált energia díját vonjuk le, a számlát emailben küldjük.
+                  {priceInfo.minCharge && (
+                    <> A bankkártyás feldolgozás minimuma {priceInfo.minCharge.toLocaleString("hu-HU")} Ft.</>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* TÖLTŐK LISTÁJA */}
-            <div className="bg-slate-900 rounded-2xl shadow border border-slate-800">
-              <div className="px-5 py-4 border-b border-slate-800">
-                <div className="font-semibold text-slate-100">Töltőállomások</div>
-                <div className="text-xs text-slate-400 mt-0.5">Keresés és szűrés</div>
+            <div className="card">
+              <div className="cardHeader">
+                <div className="cardTitle">Töltőállomások</div>
+                <div className="cardSub mt-0.5">Keresés és szűrés</div>
               </div>
 
               <div className="p-5 space-y-4">
@@ -204,6 +283,9 @@ export default function Home() {
 
           </div>
         </div>
+
+        {/* GYIK */}
+        <FaqSection />
       </div>
 
       <AppFooter />

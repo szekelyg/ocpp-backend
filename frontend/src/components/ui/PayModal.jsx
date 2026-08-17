@@ -46,12 +46,12 @@ export default function PayModal({ open, onClose, busy, children }) {
         if (!busy && e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="absolute inset-0 bg-black/60" />
+      <div className="absolute inset-0 bg-ink/40" />
       <div className="relative h-full w-full flex items-start justify-center p-4 overflow-y-auto">
         <div
           ref={panelRef}
           tabIndex={-1}
-          className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950 p-5 shadow-xl outline-none my-auto"
+          className="w-full max-w-md rounded-2xl border border-brand-line bg-white p-5 shadow-card outline-none my-auto"
         >
           {children}
         </div>
