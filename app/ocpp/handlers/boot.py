@@ -25,6 +25,8 @@ async def upsert_charge_point_from_boot(cp_id: str, payload: dict) -> None:
             now_dt = utcnow()
 
             if cp is None:
+                # Publikálatlanul jön létre: az admin felületen jelenik meg
+                # "konfigurálásra vár" alatt, az éles appban nem.
                 cp = ChargePoint(
                     ocpp_id=cp_id,
                     vendor=vendor,
@@ -33,9 +35,14 @@ async def upsert_charge_point_from_boot(cp_id: str, payload: dict) -> None:
                     firmware_version=fw,
                     status="available",
                     last_seen_at=now_dt,
+                    is_published=False,
                 )
                 session.add(cp)
-                logger.info(f"Új ChargePoint létrehozva: {cp_id}")
+                logger.warning(
+                    f"Új ChargePoint létrehozva, KONFIGURÁLÁSRA VÁR: {cp_id} "
+                    f"(vendor={vendor} model={model} serial={serial}) – "
+                    f"az admin felületen kell helyszínt/koordinátát/csatlakozót megadni és publikálni"
+                )
             else:
                 cp.vendor = vendor
                 cp.model = model

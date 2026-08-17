@@ -21,7 +21,7 @@ async def _seed_finished_session(*, energy=10.0, cost=1700.0):
         await s.flush()
         cp = ChargePoint(ocpp_id="CPS1", location_id=loc.id, connector_type="CCS2",
                          max_power_kw=50.0, status="available", ocpi_evse_uid="CPS1",
-                         last_seen_at=utcnow())
+                         last_seen_at=utcnow(), is_published=True)
         s.add(cp)
         await s.flush()
         start = utcnow() - timedelta(hours=1)

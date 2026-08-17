@@ -61,7 +61,7 @@ async def _seed_cp(ocpp_id="CMD-CP"):
         await s.flush()
         cp = ChargePoint(ocpp_id=ocpp_id, location_id=loc.id, connector_type="Type 2",
                          max_power_kw=22.0, status="available", ocpi_evse_uid=ocpp_id,
-                         last_seen_at=utcnow())
+                         last_seen_at=utcnow(), is_published=True)
         s.add(cp)
         await s.commit()
         return loc.id, cp.id

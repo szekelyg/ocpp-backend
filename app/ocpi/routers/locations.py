@@ -41,6 +41,22 @@ def _updated_expr():
     return func.coalesce(LocationORM.ocpi_last_updated, LocationORM.updated_at)
 
 
+def _has_published_evse():
+    """Csak olyan Location megy ki, amin van legalább egy publikált töltő.
+
+    Egy frissen felcsatlakozott, még konfigurálatlan töltő nem szivároghat ki a
+    roaming partnerekhez, és üres EVSE-listás Location-t sem hirdetünk meg.
+    """
+    return (
+        select(ChargePoint.id)
+        .where(
+            ChargePoint.location_id == LocationORM.id,
+            ChargePoint.is_published.is_(True),
+        )
+        .exists()
+    )
+
+
 async def _load_location(db: AsyncSession, location_id: str) -> LocationORM:
     pk = ids.parse_location_id(location_id)
     if pk is None:
@@ -49,7 +65,7 @@ async def _load_location(db: AsyncSession, location_id: str) -> LocationORM:
         await db.execute(
             select(LocationORM)
             .options(selectinload(LocationORM.charge_points).selectinload(ChargePoint.location))
-            .where(LocationORM.id == pk)
+            .where(LocationORM.id == pk, _has_published_evse())
         )
     ).scalar_one_or_none()
     if loc is None:
@@ -70,7 +86,7 @@ async def list_locations(
     page = parse_page(offset, limit)
     df, dt = _parse_dt(date_from), _parse_dt(date_to)
 
-    conds = []
+    conds = [_has_published_evse()]
     if df is not None:
         conds.append(_updated_expr() >= df)
     if dt is not None:

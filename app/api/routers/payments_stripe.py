@@ -1,6 +1,7 @@
 # app/api/routers/payments_stripe.py
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -101,6 +102,49 @@ async def _get_existing_session_for_intent(db: AsyncSession, intent_id: int) -> 
     return res.scalar_one_or_none()
 
 
+async def _release_hold(intent: ChargingIntent, reason: str) -> None:
+    """Stripe zárolás azonnali feloldása, ha az intenthez nem jön létre session.
+
+    Ilyenkor nincs olyan ChargeSession, amit a waiting-timeout háttértask
+    lezárhatna, tehát semmi más nem engedné el az ügyfél pénzét – a hold a Stripe
+    saját lejáratáig (napokig) a kártyáján maradna.
+    """
+    pi_id = intent.stripe_payment_intent_id
+    intent.status = "cancelled"
+    intent.cancel_reason = reason
+    intent.updated_at = utcnow()
+
+    if not pi_id:
+        logger.warning(f"_release_hold: nincs PaymentIntent id, intent_id={intent.id} reason={reason}")
+        return
+
+    sk = os.environ.get("STRIPE_SECRET_KEY")
+    if not sk:
+        logger.error(f"_release_hold: STRIPE_SECRET_KEY nincs beállítva, pi={pi_id} intent_id={intent.id}")
+        intent.last_error = "stripe_key_missing"
+        return
+
+    def _do() -> str:
+        import stripe as _stripe
+        _stripe.api_key = sk
+        pi = _stripe.PaymentIntent.retrieve(pi_id)
+        status = pi.get("status")
+        if status == "requires_capture":
+            _stripe.PaymentIntent.cancel(pi_id)
+            return "cancelled"
+        if status == "succeeded":
+            _stripe.Refund.create(payment_intent=pi_id)
+            return "refunded"
+        return f"noop:{status}"
+
+    try:
+        result = await asyncio.to_thread(_do)
+        logger.info(f"_release_hold: pi={pi_id} intent_id={intent.id} reason={reason} result={result}")
+    except Exception as e:
+        logger.exception(f"_release_hold failed: pi={pi_id} intent_id={intent.id}")
+        intent.last_error = str(e)[:255]
+
+
 async def _ensure_session_and_remote_start(db: AsyncSession, intent: ChargingIntent, checkout_session_id: str) -> dict:
     """
     Idempotens: ugyanarra az intentre csak 1 session lehet.
@@ -137,7 +181,9 @@ async def _ensure_session_and_remote_start(db: AsyncSession, intent: ChargingInt
             f"connector={intent.connector_id} → session_id={active_session.id}, "
             f"skipping RemoteStart for intent_id={intent.id}"
         )
-        # Intent visszafizetendő – de ez Stripe-on kezelt (hold, nem charge)
+        # Ehhez az intenthez nem jön létre session, így a waiting-timeout loop
+        # (ami csak sessionöket néz) sosem oldaná fel a zárolást → itt engedjük el.
+        await _release_hold(intent, reason="charge_point_busy")
         return {"session_id": active_session.id, "created": False, "conflict": True}
 
     # 2) új session
