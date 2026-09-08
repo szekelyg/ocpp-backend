@@ -11,12 +11,19 @@ Konfig /etc/ocpp-backend.env-ben:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from datetime import datetime, timezone
 from typing import Optional
 
 logger = logging.getLogger("invoice")
+
+# Átmeneti hibánál (Számlázz.hu 5xx, hálózati hiba, timeout) ennyiszer próbálkozunk
+# újra, egyre hosszabb várakozással. A nem átmeneti hibák (pl. hibás vevőadat,
+# rossz agent kulcs) azonnal feladják. Ha ez sem sikerül, a háttérfolyamat
+# (app.services.invoice_retry) később pótolja a számlát.
+_RETRY_DELAYS_S = (5.0, 20.0, 60.0)
 
 # 27% ÁFA – Magyarország
 _VAT_RATE = 27
@@ -25,6 +32,49 @@ _VAT_DIVISOR = 1 + _VAT_RATE / 100  # 1.27
 
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default).strip()
+
+
+class TransientInvoiceError(Exception):
+    """Átmeneti hiba: érdemes később újrapróbálni (Számlázz.hu 5xx, hálózat, timeout)."""
+
+
+def _is_transient(exc: BaseException) -> bool:
+    try:
+        import requests  # type: ignore
+    except ImportError:  # pragma: no cover
+        return False
+    if isinstance(exc, requests.exceptions.HTTPError):
+        resp = getattr(exc, "response", None)
+        code = getattr(resp, "status_code", None)
+        return code is not None and code >= 500
+    return isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout))
+
+
+async def find_invoice_number_by_order(session_id: int) -> Optional[str]:
+    """
+    Megnézi a Számlázz.hu-n, hogy ehhez a sessionhöz (rendelésszám) van-e már számla.
+    Ezzel kerüljük el a dupla számlát, ha a kiállítás sikerült, de a válasz elveszett.
+    Visszaadja a számlaszámot vagy None-t (nincs számla / nem sikerült lekérdezni).
+    """
+    agent_key = _env("SZAMLAZZ_AGENT_KEY")
+    if not agent_key:
+        return None
+    try:
+        from szamlazz import SzamlazzClient  # type: ignore
+    except ImportError:
+        return None
+
+    def _do() -> Optional[str]:
+        client = SzamlazzClient(agent_key=agent_key)
+        resp = client.query_invoice_xml(order_number=str(session_id), pdf=False)
+        resp.response.raise_for_status()
+        return resp.invoice_number or None
+
+    try:
+        return await asyncio.to_thread(_do)
+    except Exception as e:
+        logger.warning(f"Számla lekérdezés sikertelen: session_id={session_id} err={e}")
+        return None
 
 
 async def create_session_invoice(
@@ -129,20 +179,45 @@ async def create_session_invoice(
             comment_for_item=f"Session ID: {session_id}",
         )
 
-        response = client.generate_invoice(
-            header=header,
-            merchant=merchant,
-            buyer=buyer,
-            items=[item],
-            e_invoice=True,
-            invoice_download=False,
-        )
-        response.response.raise_for_status()
+        def _generate() -> Optional[str]:
+            response = client.generate_invoice(
+                header=header,
+                merchant=merchant,
+                buyer=buyer,
+                items=[item],
+                e_invoice=True,
+                invoice_download=False,
+            )
+            response.response.raise_for_status()
+            return response.invoice_number
 
-        invoice_number = response.invoice_number
+        invoice_number = await _with_retries(_generate, session_id=session_id)
+        if not invoice_number:
+            logger.error(f"Számla kiállítás: nincs számlaszám a válaszban session_id={session_id}")
+            return None
         logger.info(f"Számla kiállítva: {invoice_number} session_id={session_id} bruttó={captured_huf} HUF")
         return invoice_number
 
     except Exception as e:
         logger.exception(f"Számla kiállítás sikertelen: session_id={session_id} err={e}")
         return None
+
+
+async def _with_retries(fn, *, session_id: int):
+    """
+    A blokkoló Számlázz.hu hívást szálban futtatja (nem fogja meg az event loopot),
+    átmeneti hibánál a _RETRY_DELAYS_S szerint újrapróbálja.
+    """
+    attempts = len(_RETRY_DELAYS_S) + 1
+    for i in range(attempts):
+        try:
+            return await asyncio.to_thread(fn)
+        except Exception as e:
+            if not _is_transient(e) or i == attempts - 1:
+                raise
+            delay = _RETRY_DELAYS_S[i]
+            logger.warning(
+                f"Számlázz.hu átmeneti hiba ({i + 1}/{attempts}), újra {delay:.0f}s után: "
+                f"session_id={session_id} err={e}"
+            )
+            await asyncio.sleep(delay)

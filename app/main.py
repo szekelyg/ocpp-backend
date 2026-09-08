@@ -246,15 +246,37 @@ async def _waiting_timeout_loop() -> None:
             logger.exception("StaleChargingTimeout task error")
 
 
+# Kimaradt számlák pótlása – ha a Számlázz.hu a töltés végén nem volt elérhető.
+_INVOICE_RETRY_INTERVAL_S = int(os.environ.get("INVOICE_RETRY_INTERVAL_S", "600"))
+
+
+async def _invoice_retry_loop() -> None:
+    from app.services.invoice_retry import retry_missing_invoices_once
+    logger.info("InvoiceRetry background task started")
+    while True:
+        await asyncio.sleep(_INVOICE_RETRY_INTERVAL_S)
+        try:
+            fixed = await retry_missing_invoices_once()
+            if fixed:
+                logger.info(f"InvoiceRetry: {fixed} számla pótolva")
+        except Exception:
+            logger.exception("InvoiceRetry task error")
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    task = asyncio.create_task(_waiting_timeout_loop())
+    tasks = [
+        asyncio.create_task(_waiting_timeout_loop()),
+        asyncio.create_task(_invoice_retry_loop()),
+    ]
     yield
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    for task in tasks:
+        task.cancel()
+    for task in tasks:
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
     logger.info("Background tasks stopped")
 
 
