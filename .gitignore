@@ -9,3 +9,4 @@ backups/
 *.sql.gz
 *.sql
 node_modules/
+deploy/cloudflared/credentials.json

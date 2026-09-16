@@ -1,0 +1,11 @@
+# Cloudflare tunnel a Hetzneren – a cloudflared konténer a compose belső hálón éri el a backendet.
+# A credentials.json a tunnel titka (a Mac mini ~/.cloudflared/<tunnel-id>.json másolata), NEM kerül gitbe.
+tunnel: cf4849b9-300d-46ec-b415-e4d77dbf9a5c
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: ocpp.energiafelho.hu
+    service: http://backend:8000
+  - hostname: ev.energiafelho.hu
+    service: http://backend:8000
+  - service: http_status:404
