@@ -36,3 +36,10 @@ RUN chmod +x ./entrypoint.sh
 
 EXPOSE 8000
 ENTRYPOINT ["./entrypoint.sh"]
+
+# ---- 3. Dev/teszt (Mac mini) – pytest + a töltőszimulátor függősége, a kód volume-ról jön ----
+FROM backend AS dev
+COPY requirements-dev.txt ./requirements-dev.txt
+# a requirements-dev.txt a gyökér requirements.txt-re hivatkozik, azt is bemásoljuk
+COPY requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements-dev.txt websockets

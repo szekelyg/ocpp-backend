@@ -10,3 +10,4 @@ backups/
 *.sql
 node_modules/
 deploy/cloudflared/credentials.json
+deploy/.env.dev

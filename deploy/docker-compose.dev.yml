@@ -1,0 +1,73 @@
+# Fejlesztős / tesztelős stack a Mac minin. Az éles a Hetzneren fut (docker-compose.hetzner.yml).
+#
+#   cd deploy && docker compose -f docker-compose.dev.yml up --build
+#
+#   http://localhost:5173   – Vite dev szerver (HMR), /api, /ocpp, /ocpi → backend
+#   http://localhost:8000   – backend közvetlenül (uvicorn --reload, a kód volume-ról jön)
+#   ws://localhost:8000/ocpp/<id> – ide csatlakozik a szimulátor:
+#       docker compose -f docker-compose.dev.yml exec backend python ocpp_simulator.py ws://localhost:8000/ocpp/VLTHU_SIM01
+#
+#   Tesztek:   docker compose -f docker-compose.dev.yml run --rm backend pytest
+#   Élesből DB: ./dev-seed-db.sh   (a Hetzner legfrissebb mentését tölti a dev DB-be)
+#   Élesbe:     ./deploy.sh
+name: ocpp-dev
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ocppuser
+      # Fixen "dev": a compose a mappában lévő (éles) .env-ből interpolálna, az itt nem kell.
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: ocpp
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ocppuser -d ocpp"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: dev
+    env_file: .env.dev
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ../app:/app/app
+      - ../alembic:/app/alembic
+      - ../alembic.ini:/app/alembic.ini
+      - ../tests:/app/tests
+      - ../pytest.ini:/app/pytest.ini
+      - ../ocpp_simulator.py:/app/ocpp_simulator.py
+    ports:
+      - "127.0.0.1:8000:8000"
+    entrypoint: []
+    command: >
+      sh -c "alembic upgrade head &&
+             exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app"
+
+  frontend:
+    image: node:22-alpine
+    working_dir: /fe
+    environment:
+      VITE_PROXY_TARGET: http://backend:8000
+    volumes:
+      - ../frontend:/fe
+      - fe_node_modules:/fe/node_modules
+    ports:
+      - "127.0.0.1:5173:5173"
+    command: sh -c "npm ci --no-audit --no-fund && npx vite --host 0.0.0.0 --port 5173"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  fe_node_modules:

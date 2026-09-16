@@ -2,18 +2,22 @@
 
 OCPI env + a test DATABASE_URL must be set *before* app.core.config.settings is
 instantiated (module import time), so we set them at the very top.
+
+These are hard overrides, not defaults: the suite must give the same result no
+matter what the surrounding environment carries (e.g. the dev container loads
+deploy/.env.dev, whose real OCPI_TOKEN_A would otherwise break the auth tests).
 """
 import os
 
-os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
-os.environ.setdefault("OCPI_ENABLED", "true")
-os.environ.setdefault("OCPI_TOKEN_A", "test-token-a")
-os.environ.setdefault("OCPI_BASE_URL", "https://cpo.test")
-os.environ.setdefault("OCPI_COUNTRY_CODE", "HU")
-os.environ.setdefault("OCPI_PARTY_ID", "ENF")
-os.environ.setdefault("OCPI_BUSINESS_NAME", "Energiafelhő Kft.")
-os.environ.setdefault("OCPP_PRICE_HUF_PER_KWH", "170")
-os.environ.setdefault("STRIPE_MIN_HUF", "500")
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+os.environ["OCPI_ENABLED"] = "true"
+os.environ["OCPI_TOKEN_A"] = "test-token-a"
+os.environ["OCPI_BASE_URL"] = "https://cpo.test"
+os.environ["OCPI_COUNTRY_CODE"] = "HU"
+os.environ["OCPI_PARTY_ID"] = "ENF"
+os.environ["OCPI_BUSINESS_NAME"] = "Energiafelhő Kft."
+os.environ["OCPP_PRICE_HUF_PER_KWH"] = "170"
+os.environ["STRIPE_MIN_HUF"] = "500"
 
 import base64
 import pathlib
