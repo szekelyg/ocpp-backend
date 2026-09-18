@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import AppHeader from "../components/ui/AppHeader";
 import StatusBadge from "../components/ui/StatusBadge";
+import { AUTH_TOKEN_KEY } from "../components/ui/LoginAutofill";
 
 const POLL_MS = 3_000;
 const WAITING_TIMEOUT_S = 15 * 60; // 15 perc
@@ -15,6 +16,20 @@ function formatDuration(s) {
   if (h > 0) return `${h}ó ${m}p ${sec}mp`;
   if (m > 0) return `${m}p ${sec}mp`;
   return `${sec}mp`;
+}
+
+// Intent-token: a fizetés után a success_url-ben (és az e-mail linkjében) kapott "t"
+// paraméter. A stop végpont ezzel ellenőrzi, hogy a töltés indítója kéri a leállítást.
+// sessionStorage-ba is elmentjük, hogy a "?t=" nélküli újratöltés / visszalépés se veszítse el.
+function intentTokenFor(sessionId) {
+  const key = `ef_intent_token_${sessionId}`;
+  let t = "";
+  try { t = new URLSearchParams(window.location.search).get("t") || ""; } catch { /* ignore */ }
+  try {
+    if (t) sessionStorage.setItem(key, t);
+    else t = sessionStorage.getItem(key) || "";
+  } catch { /* ignore */ }
+  return t;
 }
 
 function phaseof(session) {
@@ -59,10 +74,11 @@ export default function ChargingPage() {
   }, [sessionId]);
 
   useEffect(() => {
+    intentTokenFor(sessionId); // a "?t=" token elmentése már betöltéskor
     fetchSession();
     const t = setInterval(fetchSession, POLL_MS);
     return () => clearInterval(t);
-  }, [fetchSession]);
+  }, [sessionId, fetchSession]);
 
   // Redirect countdown – timeout és finished esetén egyaránt
   // A finished_at-tól számítjuk a maradék időt, így oldalfrissítés után sem indul újra 30mp-ről.
@@ -90,8 +106,16 @@ export default function ChargingPage() {
     setStopBusy(true);
     setStopErr("");
     try {
+      const headers = { "Content-Type": "application/json" };
+      // Tartalék: ha e-mail-kóddal be van lépve, a saját e-mailjéhez tartozó töltést
+      // ezzel is leállíthatja (pl. régi, token nélküli link esetén).
+      let authToken = "";
+      try { authToken = localStorage.getItem(AUTH_TOKEN_KEY) || ""; } catch { /* ignore */ }
+      if (authToken) headers.Authorization = `Bearer ${authToken}`;
       const res = await fetch(`/api/sessions/${sessionId}/stop`, {
         method: "POST",
+        headers,
+        body: JSON.stringify({ token: intentTokenFor(sessionId) || null }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {

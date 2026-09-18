@@ -96,3 +96,28 @@ def verify_token(token: str) -> Optional[str]:
         return _b64u_decode(parts[1]).decode("utf-8")
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Intent-token: a vendég (regisztráció nélküli) töltés "birtoklási" bizonyítéka
+# ---------------------------------------------------------------------------
+# Ugyanaz az aláírt token-formátum, csak az alany nem e-mail, hanem "intent:<id>".
+# A POST /api/intents/ adja ki, a Stripe success_url-ben és a "töltés elindult"
+# e-mail linkjében utazik, és a POST /api/sessions/{id}/stop ezzel ellenőrzi, hogy
+# tényleg az állítja le a töltést, aki fizetett érte. Nem kell hozzá bejelentkezés.
+INTENT_TOKEN_TTL_S = 7 * 24 * 60 * 60
+
+
+def _intent_subject(intent_id: int) -> str:
+    return f"intent:{int(intent_id)}"
+
+
+def issue_intent_token(intent_id: int) -> str:
+    return issue_token(_intent_subject(intent_id), ttl_s=INTENT_TOKEN_TTL_S)
+
+
+def verify_intent_token(token: Optional[str], intent_id: Optional[int]) -> bool:
+    """True, ha a token érvényes és pont ehhez az intenthez tartozik."""
+    if not token or intent_id is None:
+        return False
+    return verify_token(token) == _intent_subject(intent_id)

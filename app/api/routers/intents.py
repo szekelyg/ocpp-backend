@@ -7,16 +7,24 @@ from datetime import datetime, timezone, timedelta
 import stripe
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, EmailStr
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
 from app.api.routers.charge_points import compute_status
 from app.db.models import ChargePoint, ChargingIntent
+from app.services.auth_tokens import issue_intent_token
 
 logger = logging.getLogger("intents")
 
 router = APIRouter(prefix="/intents", tags=["intents"])
+
+# Anti-spam a nyilvános, hitelesítés nélküli végponton – ugyanaz a DB-alapú minta,
+# mint az /auth/request-code cooldownja: egy e-mail-címről az intent élettartamán
+# (15 perc) belül legfeljebb ennyi fizetési kísérlet indítható. Egy tisztességes
+# felhasználónak ez bőven elég (a Stripe-oldalról visszalépve is új intent jön létre).
+INTENT_RATE_WINDOW_S = 15 * 60
+INTENT_RATE_MAX_PER_EMAIL = 10
 
 # Stripe API key inicializálás egyszer, modulbetöltéskor
 _stripe_key = os.environ.get("STRIPE_SECRET_KEY")
@@ -92,6 +100,27 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
             },
         )
 
+    # 1b) E-mail-enkénti throttle (lásd INTENT_RATE_*)
+    recent = (
+        await db.execute(
+            select(func.count())
+            .select_from(ChargingIntent)
+            .where(
+                ChargingIntent.anonymous_email == str(body.email),
+                ChargingIntent.created_at > _utcnow() - timedelta(seconds=INTENT_RATE_WINDOW_S),
+            )
+        )
+    ).scalar_one()
+    if recent >= INTENT_RATE_MAX_PER_EMAIL:
+        logger.warning("intent rate limit hit email=%s recent=%s", body.email, recent)
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "too_many_intents",
+                "hint": "Túl sok fizetési kísérlet indult erről az e-mail-címről. Kérjük, próbálja újra néhány perc múlva.",
+            },
+        )
+
     # 2) Intent létrehozás DB-ben
     intent = ChargingIntent(
         charge_point_id=cp.id,
@@ -111,26 +140,11 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
     )
     db.add(intent)
 
-    # Opcionális: számlázási profil mentése a visszatérő belépéshez (email OTP-vel érhető el).
-    # Kártyaadat SOHA nem kerül ide – az mindig a Stripe-nál marad.
-    if body.save_profile:
-        from app.api.routers.auth import upsert_user_profile
-
-        await upsert_user_profile(
-            db,
-            email=str(body.email),
-            fields={
-                "billing_type": body.billing_type,
-                "billing_name": body.billing_name,
-                "billing_street": body.billing_street,
-                "billing_zip": body.billing_zip,
-                "billing_city": body.billing_city,
-                "billing_country": body.billing_country,
-                "billing_company": body.billing_company if body.billing_type == "business" else None,
-                "billing_tax_number": body.billing_tax_number if body.billing_type == "business" else None,
-            },
-        )
-
+    # A "mentse az adataimat" pipa (save_profile) NEM itt ír a users táblába: ez a végpont
+    # hitelesítés nélkül hívható, így bárki tetszőleges e-mail-címre hozhatna létre
+    # profilt. A jelzőt a Stripe metadata viszi, és a profilt a sikeres fizetés
+    # webhookja menti (payments_stripe.stripe_webhook) – tehát csak az kap profilt,
+    # aki ténylegesen fizetett. Kártyaadat SOHA nem kerül ide – az a Stripe-nál marad.
     await db.commit()
     await db.refresh(intent)
 
@@ -144,7 +158,11 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
             "intent_id": str(intent.id),
             "charge_point_id": str(cp.id),
             "connector_id": str(body.connector_id),
+            "save_profile": "1" if body.save_profile else "0",
         }
+        # Intent-token: ezzel bizonyítja a vendég a /api/sessions/{id}/stop-nál, hogy ő
+        # indította a töltést. A success_url-lel jut vissza a böngészőbe.
+        intent_token = issue_intent_token(intent.id)
 
         product_name = (
             "EV töltési előleg – céges számla"
@@ -154,7 +172,7 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
 
         params = {
             "mode": "payment",
-            "success_url": f"{base_url}/pay/success?intent_id={intent.id}",
+            "success_url": f"{base_url}/pay/success?intent_id={intent.id}&t={intent_token}",
             "cancel_url": f"{base_url}/pay/cancel?intent_id={intent.id}",
             "customer_email": str(body.email),
             "client_reference_id": str(intent.id),

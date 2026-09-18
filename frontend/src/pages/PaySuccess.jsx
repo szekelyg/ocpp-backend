@@ -8,6 +8,8 @@ const POLL_INTERVAL_MS = 3_000;
 export default function PaySuccess() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const intentId = params.get("intent_id");
+  // Intent-token a backend success_url-jéből: ezzel lehet majd leállítani a töltést.
+  const intentToken = params.get("t") || "";
   const navigate = useNavigate();
 
   const [phase, setPhase] = useState("polling");
@@ -27,7 +29,8 @@ export default function PaySuccess() {
         const res = await fetch(`/api/sessions/by-intent/${intentId}`);
         if (res.ok) {
           const data = await res.json();
-          navigate(`/charging/${data.id}`, { replace: true });
+          const q = intentToken ? `?t=${encodeURIComponent(intentToken)}` : "";
+          navigate(`/charging/${data.id}${q}`, { replace: true });
           return;
         }
       } catch (_) {}
@@ -45,7 +48,7 @@ export default function PaySuccess() {
 
     timerRef.current = setTimeout(poll, POLL_INTERVAL_MS);
     return () => clearTimeout(timerRef.current);
-  }, [intentId, navigate]);
+  }, [intentId, intentToken, navigate]);
 
   if (phase === "no_intent") {
     return (

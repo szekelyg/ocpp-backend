@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import get_db
 from app.db.models import ChargePoint, ChargeSession, ChargingIntent, Location
 from app.api.routers.charge_points import compute_status
+from app.services.auth_tokens import issue_intent_token
 
 logger = logging.getLogger("admin")
 
@@ -550,7 +551,7 @@ async def admin_test_charge(
         }
         checkout = _stripe.checkout.Session.create(
             mode="payment",
-            success_url=f"{base_url}/pay/success?intent_id={intent.id}",
+            success_url=f"{base_url}/pay/success?intent_id={intent.id}&t={issue_intent_token(intent.id)}",
             cancel_url=f"{base_url}/pay/cancel?intent_id={intent.id}",
             customer_email=email,
             client_reference_id=str(intent.id),

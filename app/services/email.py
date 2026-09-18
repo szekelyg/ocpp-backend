@@ -150,9 +150,16 @@ async def send_charging_started_email(
     to: str,
     session_id: int,
     cp_ocpp_id: str = "—",
+    intent_token: Optional[str] = None,
 ) -> bool:
-    """Töltés indult – értesítő email."""
+    """Töltés indult – értesítő email.
+
+    A linkben utazik az intent-token is: a töltési oldal ezzel tudja leállítani a
+    töltést (POST /api/sessions/{id}/stop csak az indítónak engedi).
+    """
     session_url = f"{_base_url()}/charging/{session_id}"
+    if intent_token:
+        session_url += f"?t={intent_token}"
 
     body = f"""
     <h2 style="margin:0 0 8px;font-size:20px;color:#f1f5f9;">Töltés elindult</h2>

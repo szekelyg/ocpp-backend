@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.security import HTTPBasicCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, select
@@ -17,6 +17,7 @@ from app.api.routers.admin import verify_admin
 from app.db.models import ChargePoint, ChargeSession, MeterSample
 from app.ocpp.ocpp_ws import remote_start_transaction, remote_stop_transaction
 from app.ocpp.ocpp_utils import MIN_CHARGE_HUF, _price_huf_per_kwh
+from app.services.auth_tokens import verify_intent_token, verify_token
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -186,6 +187,11 @@ class StopSessionIn(BaseModel):
     session_id: int = Field(..., ge=1)
 
 
+class StopPublicIn(BaseModel):
+    # A POST /api/intents/ által kiadott intent-token (a success_url "t" paramétere).
+    token: Optional[str] = Field(None, max_length=512)
+
+
 
 # ---------------------------------------------------------------------------
 # Routes – sorrendben: specifikusabb előbb, /{session_id} utoljára
@@ -194,6 +200,7 @@ class StopSessionIn(BaseModel):
 @router.get("/", response_model=list[dict])
 async def list_sessions(
     db: AsyncSession = Depends(get_db),
+    _: HTTPBasicCredentials = Depends(verify_admin),
     charge_point_id: Optional[int] = Query(None, ge=1),
     connector_id: Optional[int] = Query(None, ge=0),
     active_only: bool = Query(False),
@@ -224,6 +231,7 @@ async def get_active_session_for_cp(
     cp_id: int,
     connector_id: Optional[int] = Query(None, ge=0),
     db: AsyncSession = Depends(get_db),
+    _: HTTPBasicCredentials = Depends(verify_admin),
 ):
     s = await _get_active_session(db, charge_point_id=cp_id, connector_id=connector_id)
     if not s:
@@ -360,12 +368,31 @@ async def get_session(
     return _session_to_dict(s, s.charge_point, power_w=power_w, hold_amount_huf=hold, phases=phases)
 
 
+def _may_stop_session(s: ChargeSession, body: Optional[StopPublicIn], authorization: Optional[str]) -> bool:
+    """Csak az állíthatja le a töltést, aki indította.
+
+    Két bizonyíték fogadható el (bejelentkezés egyikhez sem kell):
+      1) intent-token – a fizetéskor kiadott, aláírt token (success_url / e-mail link),
+      2) Bearer e-mail-token (OTP-s belépés), ha az e-mail egyezik a session indítójával.
+    Admin leállításra az /api/admin/sessions/{id}/stop való.
+    """
+    if body and body.token and verify_intent_token(body.token, s.intent_id):
+        return True
+    if authorization and authorization.lower().startswith("bearer ") and s.anonymous_email:
+        email = verify_token(authorization.split(" ", 1)[1].strip())
+        if email and email == s.anonymous_email.strip().lower():
+            return True
+    return False
+
+
 @router.post("/{session_id}/stop", response_model=dict)
 async def stop_session_public(
     session_id: int,
+    body: Optional[StopPublicIn] = None,
     db: AsyncSession = Depends(get_db),
+    authorization: Optional[str] = Header(None),
 ):
-    """Publikus stop – kód nélkül, egyszerű leállítás."""
+    """Publikus stop – a vendég saját töltésének leállítása (intent-tokennel)."""
     res = await db.execute(
         select(ChargeSession)
         .options(selectinload(ChargeSession.charge_point))
@@ -374,6 +401,16 @@ async def stop_session_public(
     s = res.scalar_one_or_none()
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    if not _may_stop_session(s, body, authorization):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "stop_not_authorized",
+                "hint": "Ezt a töltést csak az indítója állíthatja le. Nyissa meg a fizetés után kapott "
+                        "oldalt vagy az e-mailben küldött linket, illetve állítsa le a töltőn / az autóban.",
+            },
+        )
 
     if s.finished_at is not None:
         return {"ok": True, "already_finished": True, "session": _session_to_dict(s, s.charge_point)}

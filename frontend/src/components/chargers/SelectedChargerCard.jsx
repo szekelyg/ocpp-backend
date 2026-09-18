@@ -169,7 +169,7 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
         throw new Error(
           typeof data?.detail === "string"
             ? data.detail
-            : data?.detail?.error || data?.error || "Nem sikerült a fizetési folyamatot elindítani."
+            : data?.detail?.hint || data?.detail?.error || data?.error || "Nem sikerült a fizetési folyamatot elindítani."
         );
       }
 

@@ -18,6 +18,7 @@ from app.db.models import ChargePoint, ChargeSession, ChargingIntent
 from app.db.session import AsyncSessionLocal
 from app.ocpp.registry import remote_start_transaction
 from app.ocpp.time_utils import utcnow
+from app.services.auth_tokens import issue_intent_token
 from app.services.email import send_charging_started_email
 
 logger = logging.getLogger("payments.stripe")
@@ -223,6 +224,7 @@ async def _ensure_session_and_remote_start(db: AsyncSession, intent: ChargingInt
             to=intent.anonymous_email,
             session_id=cs.id,
             cp_ocpp_id="—",
+            intent_token=issue_intent_token(intent.id),
         )
         return {"session_id": cs.id, "created": True, "remote_start": "skipped_no_cp"}
 
@@ -241,9 +243,31 @@ async def _ensure_session_and_remote_start(db: AsyncSession, intent: ChargingInt
         to=intent.anonymous_email,
         session_id=cs.id,
         cp_ocpp_id=cp.ocpp_id,
+        intent_token=issue_intent_token(intent.id),
     )
 
     return {"session_id": cs.id, "created": True, "remote_start": ocpp_res}
+
+
+async def _save_billing_profile(db: AsyncSession, intent: ChargingIntent) -> None:
+    """Az intent számlázási adatainak upsertje a users táblába (idempotens, nem commitál)."""
+    from app.api.routers.auth import upsert_user_profile
+
+    business = intent.billing_type == "business"
+    await upsert_user_profile(
+        db,
+        email=intent.anonymous_email,
+        fields={
+            "billing_type": intent.billing_type,
+            "billing_name": intent.billing_name,
+            "billing_street": intent.billing_street,
+            "billing_zip": intent.billing_zip,
+            "billing_city": intent.billing_city,
+            "billing_country": intent.billing_country,
+            "billing_company": intent.billing_company if business else None,
+            "billing_tax_number": intent.billing_tax_number if business else None,
+        },
+    )
 
 
 # ---------------------------------------------------------------------
@@ -332,6 +356,11 @@ async def stripe_webhook(
             intent.updated_at = now
             await db.commit()
             return {"ok": True}
+
+        # "Adataim mentése" – a számlázási profil CSAK sikeres fizetés után kerül a users
+        # táblába (a POST /api/intents/ hitelesítés nélküli, ott nem írunk usert).
+        if metadata.get("save_profile") == "1":
+            await _save_billing_profile(db, intent)
 
         result = await _ensure_session_and_remote_start(db, intent, str(checkout_session_id or ""))
 
