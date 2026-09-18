@@ -132,9 +132,13 @@ async def test_public_stop_rejects_without_proof(client, stop_accepted):
                               json={"token": "v1.x.y.z"})).status_code == 403
     assert (await client.post(f"/api/sessions/{sid}/stop",
                               json={"token": issue_intent_token(other_intent)})).status_code == 403
-    # Egy e-mail-token nem intent-token, még ha a "subject" egyezne is
+    # Egy e-mail-token (v1) nem intent-token (v1i), még ha az alanya pont "intent:<id>" lenne is
     assert (await client.post(f"/api/sessions/{sid}/stop",
-                              json={"token": issue_token(f"intent:{intent_id}"[::-1])})).status_code == 403
+                              json={"token": issue_token(f"intent:{intent_id}")})).status_code == 403
+    # ...és a prefix átírása elrontja az aláírást
+    relabeled = "v1i." + issue_token(f"intent:{intent_id}").split(".", 1)[1]
+    assert (await client.post(f"/api/sessions/{sid}/stop",
+                              json={"token": relabeled})).status_code == 403
 
     # Más e-mail Bearer-tokenje
     assert (await client.post(
@@ -187,6 +191,20 @@ async def test_admin_stop_still_works(client, stop_accepted):
     assert (await client.post("/api/sessions/stop", json={"session_id": sid})).status_code == 401
     r = await client.post("/api/sessions/stop", json={"session_id": sid}, headers=ADMIN_AUTH)
     assert r.status_code == 200, r.text
+
+
+@pytest.mark.asyncio
+async def test_intent_token_is_not_an_email_token(client):
+    """Fordított irány: az intent-token nem fogadható el bejelentkezésként."""
+    cp_id = await _seed_cp()
+    _, intent_id = await _seed_session(cp_id)
+    r = await client.get("/api/auth/profile",
+                         headers={"Authorization": f"Bearer {issue_intent_token(intent_id)}"})
+    assert r.status_code == 401
+    # a valódi e-mail-token továbbra is jó
+    r = await client.get("/api/auth/profile",
+                         headers={"Authorization": f"Bearer {issue_token('vendeg@example.hu')}"})
+    assert r.status_code == 200
 
 
 # ── Intents: users-írás, token, throttle ─────────────────────────────────────

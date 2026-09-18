@@ -20,11 +20,19 @@ function formatDuration(s) {
 
 // Intent-token: a fizetés után a success_url-ben (és az e-mail linkjében) kapott "t"
 // paraméter. A stop végpont ezzel ellenőrzi, hogy a töltés indítója kéri a leállítást.
-// sessionStorage-ba is elmentjük, hogy a "?t=" nélküli újratöltés / visszalépés se veszítse el.
+// sessionStorage-ba mentjük, és utána kivesszük az URL-ből (history.replaceState), hogy ne
+// kerüljön Refererbe / böngésző-előzménybe; az újratöltés / visszalépés a tárolt példányt használja.
 function intentTokenFor(sessionId) {
   const key = `ef_intent_token_${sessionId}`;
   let t = "";
-  try { t = new URLSearchParams(window.location.search).get("t") || ""; } catch { /* ignore */ }
+  try {
+    const url = new URL(window.location.href);
+    t = url.searchParams.get("t") || "";
+    if (t) {
+      url.searchParams.delete("t");
+      window.history.replaceState(window.history.state, "", url.toString());
+    }
+  } catch { /* ignore */ }
   try {
     if (t) sessionStorage.setItem(key, t);
     else t = sessionStorage.getItem(key) || "";

@@ -32,7 +32,7 @@ Nem volt lyuk: `POST /api/sessions/start` és `POST /api/sessions/stop` (body-s,
 |---|---|---|
 | **Admin Basic auth** – `verify_admin` (`admin.py`): `ADMIN_USERNAME`/`ADMIN_PASSWORD` env, `secrets.compare_digest`, `ADMIN_PASSWORD` nélkül 503 (fail-closed) | `/api/admin/*`, `/api/sessions/start`, `/api/sessions/stop`, **most már** `/api/sessions/` és `/active/by-charge-point` | AdminPage (`sessionStorage.admin_token`, Basic) |
 | **E-mail OTP → Bearer HMAC-token** – `auth_tokens.issue_token/verify_token`, `get_current_email` (`auth.py`); titok: `AUTH_SECRET` (fallback `STRIPE_WEBHOOK_SECRET`) | `/api/auth/profile`; **most már** a publikus stop tartalék útja | Számlázási profil autofill (LoginAutofill, `localStorage.ef_auth_token`) |
-| **Intent-token (új)** – `auth_tokens.issue_intent_token/verify_intent_token`: ugyanaz az aláírt formátum, alany `intent:<id>`, 7 nap TTL | `POST /api/intents/` adja ki a Stripe `success_url`-ben (`&t=`), a "töltés elindult" e-mail linkjében; `POST /api/sessions/{id}/stop` ellenőrzi | Vendég-folyamat, regisztráció nélkül |
+| **Intent-token (új)** – `auth_tokens.issue_intent_token/verify_intent_token`: ugyanaz az aláírt formátum, de külön típus-prefix (`v1i`, az aláírt payload része – e-mail-tokenné nem címkézhető át és fordítva), alany `intent:<id>`, 7 nap TTL | `POST /api/intents/` adja ki a Stripe `success_url`-ben (`&t=`), a "töltés elindult" e-mail linkjében; `POST /api/sessions/{id}/stop` ellenőrzi | Vendég-folyamat, regisztráció nélkül |
 | **Stripe webhook aláírás** – `_verify_stripe_signature` | `/api/payments/stripe/webhook` | Stripe |
 | OCPI Token A/C | `/ocpi/*` | roaming partnerek |
 
@@ -43,7 +43,8 @@ Nem volt lyuk: `POST /api/sessions/start` és `POST /api/sessions/stop` (body-s,
    → Stripe. A backend a `success_url`-t `…/pay/success?intent_id=N&t=<intent-token>`-re állítja.
 3. Stripe visszairányít → PaySuccess pollozza `GET /api/sessions/by-intent/{intent_id}` (publikus),
    majd `navigate('/charging/{session_id}?t=<intent-token>')`.
-4. ChargingPage pollozza `GET /api/sessions/{id}` (publikus), a tokent `sessionStorage`-ba menti.
+4. ChargingPage pollozza `GET /api/sessions/{id}` (publikus), a tokent `sessionStorage`-ba menti és
+   `history.replaceState`-tel kiveszi az URL-ből (ne kerüljön Refererbe / előzménybe).
    Stop gomb → `POST /api/sessions/{id}/stop` body `{ token }` (+ `Authorization: Bearer`, ha
    az OTP-s belépés tokenje megvan a `localStorage`-ban).
 5. Webhook (`checkout.session.completed`) → ChargeSession + RemoteStart + "töltés elindult"
