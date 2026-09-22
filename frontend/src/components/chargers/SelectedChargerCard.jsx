@@ -33,6 +33,15 @@ function Field({ label, children }) {
 
 const inputCls = "field";
 
+// Teljes-e a mentett profil (a kötelező számlázási mezők megvannak)? Céges típusnál cég + adószám is.
+function profileIsComplete(p) {
+  if (!p) return false;
+  const req = ["billing_name", "billing_street", "billing_zip", "billing_city", "billing_country"];
+  if (!req.every((k) => (p[k] || "").trim())) return false;
+  if (p.billing_type === "business") return !!((p.billing_company || "").trim() && (p.billing_tax_number || "").trim());
+  return true;
+}
+
 export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, onAutoOpenDone, compact = false }) {
   const [email, setEmail] = useState("");
   const [holdAmount, setHoldAmount] = useState(5000);
@@ -54,12 +63,34 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
 
   // "Adataim mentése legközelebbre" pipa (regisztráció). Kártyaadatot SOHA nem mentünk.
   const [saveProfile, setSaveProfile] = useState(false);
+  // A /api/me-ből betöltött, TELJES mentett számlázási profil (null, ha nincs vagy hiányos).
+  // Amíg az űrlap ezzel megegyezik, a pipa felesleges (és zavaró) — nincs mit menteni.
+  const [savedProfile, setSavedProfile] = useState(null);
 
   // Bejelentkezett fiók (Energiafelhő-fiók vagy e-mail-kód): { email, source }. Ilyenkor a
   // backend a fiók e-mailjére köti a töltést (a body-beli e-mailt figyelmen kívül hagyja).
   const [account, setAccount] = useState(null);
 
   const lines = useMemo(() => (cp ? placeLines(cp) : ["", ""]), [cp]);
+
+  // Mikor kell a „mentés" pipa? Vendégnek mindig; belépve csak akkor, ha még nincs teljes
+  // mentett profil, VAGY az űrlap eltér a mentettől (módosította az adatait → újra menthető).
+  // Ha a belépett felhasználó adatai betöltődtek és nem nyúlt hozzájuk, a pipa nem jelenik meg.
+  const formMatchesSaved = useMemo(() => {
+    if (!savedProfile) return false;
+    const same = (a, b) => (a || "").trim().toLowerCase() === (b || "").trim().toLowerCase();
+    const base =
+      same(billingType, savedProfile.billing_type || "personal") &&
+      same(billingName, savedProfile.billing_name) &&
+      same(billingStreet, savedProfile.billing_street) &&
+      same(billingZip, savedProfile.billing_zip) &&
+      same(billingCity, savedProfile.billing_city) &&
+      same(billingCountry, savedProfile.billing_country || "HU");
+    if (!base) return false;
+    if (billingType !== "business") return true;
+    return same(billingCompany, savedProfile.billing_company) && same(billingTaxNumber, savedProfile.billing_tax_number);
+  }, [savedProfile, billingType, billingName, billingStreet, billingZip, billingCity, billingCountry, billingCompany, billingTaxNumber]);
+  const showSaveProfile = !account || !savedProfile || !formMatchesSaved;
   const canStart = cp && isStartable(cp.status) && !busy;
 
   // Mentett számlázási profil betöltése az űrlapba.
@@ -82,13 +113,14 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
   useEffect(() => {
     let cancelled = false;
     async function loadMe() {
-      if (!isLoggedIn()) { if (!cancelled) setAccount(null); return; }
+      if (!isLoggedIn()) { if (!cancelled) { setAccount(null); setSavedProfile(null); } return; }
       try {
         const res = await apiFetch("/api/me", { headers: { Accept: "application/json" } });
         if (!res.ok) { if (!cancelled) setAccount(null); return; }
         const data = await res.json().catch(() => ({}));
         if (cancelled || !data?.email) return;
         setAccount({ email: data.email, source: data.auth_source || authSource() });
+        setSavedProfile(profileIsComplete(data.profile) ? data.profile : null);
         applyProfile(data.profile || null, data.email);
       } catch { /* offline / hiba – néma */ }
     }
@@ -164,7 +196,8 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
           billing_country: billingCountry.trim().toUpperCase(),
           billing_company: billingType === "business" ? billingCompany.trim() : null,
           billing_tax_number: billingType === "business" ? billingTaxNumber.trim() : null,
-          save_profile: saveProfile,
+          // Rejtett pipánál (mentett, változatlan adatok) nincs mit menteni.
+          save_profile: showSaveProfile && saveProfile,
         }),
       });
 
@@ -573,20 +606,33 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
             </div>
           )}
 
-          {/* Adatok mentése legközelebbre (regisztráció) */}
-          <label className="mt-3 flex items-start gap-3 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={saveProfile}
-              onChange={(e) => setSaveProfile(e.target.checked)}
-              disabled={busy}
-              className="mt-0.5 h-4 w-4 rounded border-brand-line accent-brand-action cursor-pointer shrink-0"
-            />
-            <span className="text-xs text-ink-soft leading-relaxed">
-              Számlázási adataim mentése a következő alkalomra. Legközelebb elég belépned az
-              email-címeddel — a kártyaadataidat <span className="font-semibold text-ink">soha nem tároljuk</span>.
-            </span>
-          </label>
+          {/* Adatok mentése legközelebbre (regisztráció) — csak ha van mit menteni:
+              vendégnek, vagy belépve mentett profil nélkül / a mentettől eltérő adatokkal. */}
+          {showSaveProfile ? (
+            <label className="mt-3 flex items-start gap-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={saveProfile}
+                onChange={(e) => setSaveProfile(e.target.checked)}
+                disabled={busy}
+                className="mt-0.5 h-4 w-4 rounded border-brand-line accent-brand-action cursor-pointer shrink-0"
+              />
+              <span className="text-xs text-ink-soft leading-relaxed">
+                {account && savedProfile ? (
+                  <>Módosított számlázási adataim mentése a következő alkalomra — a kártyaadataidat <span className="font-semibold text-ink">soha nem tároljuk</span>.</>
+                ) : (
+                  <>
+                    Számlázási adataim mentése a következő alkalomra. Legközelebb elég belépned az
+                    email-címeddel — a kártyaadataidat <span className="font-semibold text-ink">soha nem tároljuk</span>.
+                  </>
+                )}
+              </span>
+            </label>
+          ) : (
+            <div className="mt-3 text-xs text-ink-muted">
+              A mentett számlázási adataid betöltöttük. Ha módosítod őket, itt elmentheted az újakat.
+            </div>
+          )}
         </div>
 
         {err && <div className="mt-3 text-sm text-rose-600">{err}</div>}
