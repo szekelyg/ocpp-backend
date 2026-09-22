@@ -78,11 +78,11 @@ async def _link_keycloak_user(db: AsyncSession, email: str, sub: str) -> None:
         user.keycloak_sub = sub
         user.updated_at = utcnow()
     elif user.keycloak_sub != sub:
-        # Ugyanaz a (megerősített) e-mail, más Keycloak-alany: pl. újra létrehozott realm/felhasználó.
-        # Az e-mail a kulcs, ezért engedjük, de naplózzuk és átkötjük.
-        logger.warning("keycloak_sub változott email=%s régi=%s új=%s", email, user.keycloak_sub, sub)
-        user.keycloak_sub = sub
-        user.updated_at = utcnow()
+        # Ugyanaz az e-mail, MÁS Keycloak-alany: nem írjuk át csendben (fiók-átvétel ellen;
+        # a portál és az app. ugyanígy elutasít). Csak törölt-újralétrehozott Keycloak-fióknál
+        # fordulhat elő — akkor kézi rendezés kell.
+        logger.warning("keycloak_sub ütközés: %s már más alanyhoz kötött, az új sub elutasítva", email)
+        raise HTTPException(status_code=403, detail="keycloak_sub_mismatch")
     else:
         return
     try:

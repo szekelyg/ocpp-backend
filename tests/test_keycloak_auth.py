@@ -116,7 +116,9 @@ def make_token(*, key=KEY_A, kid="kid-a", alg="RS256", email="ugyfel@example.hu"
                typ="Bearer", extra=None, drop=()):
     now = int(time.time())
     claims = {
-        "iss": iss, "sub": sub or str(uuid.uuid4()), "iat": now, "exp": now + exp_in,
+        # Alapból determinisztikus sub az e-mailből (a Keycloakban egy e-mail = egy alany;
+        # más sub ugyanarra az e-mailre szándékosan 403).
+        "iss": iss, "sub": sub or f"sub-{email}", "iat": now, "exp": now + exp_in,
         "azp": azp, "typ": typ, "email": email, "email_verified": verified,
         "name": "Teszt Ügyfél", "preferred_username": email,
     }
@@ -215,6 +217,19 @@ async def test_existing_email_user_gets_linked_and_profile_returned(client):
     assert r.json()["profile"]["billing_name"] == "Régi Réka"
     users = await _users()
     assert len(users) == 1 and users[0].keycloak_sub == "sub-regi"
+
+
+@pytest.mark.asyncio
+async def test_different_sub_for_linked_email_is_rejected(client):
+    """Ugyanaz az e-mail, más Keycloak-alany: 403, a régi kötés marad (fiók-átvétel ellen)."""
+    async with TestSession() as s:
+        s.add(User(email="kotott@example.hu", keycloak_sub="sub-eredeti"))
+        await s.commit()
+    r = await client.get("/api/me", headers=bearer(make_token(email="kotott@example.hu", sub="sub-masik")))
+    assert r.status_code == 403
+    assert r.json()["detail"] == "keycloak_sub_mismatch"
+    users = await _users()
+    assert len(users) == 1 and users[0].keycloak_sub == "sub-eredeti"
 
 
 @pytest.mark.asyncio
