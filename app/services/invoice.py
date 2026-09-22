@@ -77,6 +77,36 @@ async def find_invoice_number_by_order(session_id: int) -> Optional[str]:
         return None
 
 
+async def fetch_invoice_pdf(invoice_number: str) -> Optional[bytes]:
+    """
+    A kiállított e-számla PDF-je a Számlázz.hu-ról (GET /api/me/sessions/{id}/invoice).
+    A PDF-et nem tároljuk; minden letöltés a Számlázz.hu Agent API-t kérdezi.
+    None, ha nincs agent kulcs / lib, vagy a lekérés nem sikerült.
+    """
+    agent_key = _env("SZAMLAZZ_AGENT_KEY")
+    if not agent_key or not invoice_number:
+        return None
+    try:
+        from szamlazz import SzamlazzClient  # type: ignore
+    except ImportError:
+        return None
+
+    def _do() -> Optional[bytes]:
+        client = SzamlazzClient(agent_key=agent_key)
+        resp = client.query_invoice_pdf(invoice_number=invoice_number)
+        if resp.has_errors:
+            logger.warning(f"Számla PDF lekérés hiba: {invoice_number} {resp.error_code} {resp.error_message}")
+            return None
+        data = resp.get_pdf_bytes()
+        return data if data and data[:4] == b"%PDF" else None
+
+    try:
+        return await asyncio.to_thread(_do)
+    except Exception as e:
+        logger.warning(f"Számla PDF lekérés sikertelen: {invoice_number} err={e}")
+        return None
+
+
 async def create_session_invoice(
     session_id: int,
     energy_kwh: Optional[float],

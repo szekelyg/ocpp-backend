@@ -7,6 +7,10 @@ Folyamat:
   1) POST /auth/request-code {email}      → 6 jegyű kód emailben
   2) POST /auth/verify-code {email, code} → { token, profile }
   3) GET  /auth/profile   (Bearer token)  → { profile }   (autofill-hez)
+
+Egységes Energiafelhő-fiók (Keycloak): a SPA a GET /auth/keycloak/config adataival indítja
+az Authorization Code + PKCE folyamatot; a kapott access tokent ugyanúgy Bearer-ként küldi,
+és az app.api.deps.get_current_identity mindkét tokenfajtát elfogadja (lásd docs/KEYCLOAK.md).
 """
 from __future__ import annotations
 
@@ -187,6 +191,16 @@ async def verify_code(body: VerifyCodeIn, db: AsyncSession = Depends(get_db)):
 
     token = issue_token(email)
     return {"ok": True, "token": token, "profile": _profile_dict(user)}
+
+
+@router.get("/keycloak/config", response_model=dict)
+async def keycloak_config():
+    """A SPA Keycloak-belépéséhez szükséges, nem titkos OIDC adatok (PKCE public kliens).
+
+    Nincs KEYCLOAK_ISSUER → {"enabled": false}, és a frontend nem mutatja a gombot.
+    """
+    from app.services.keycloak import public_config
+    return await public_config()
 
 
 @router.get("/profile", response_model=dict)

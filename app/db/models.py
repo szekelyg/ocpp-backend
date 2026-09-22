@@ -407,6 +407,11 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), nullable=False, unique=True, index=True)
 
+    # Egységes Energiafelhő-fiók (Keycloak, realm "ugyfelek") alanya. Az első, megerősített
+    # e-mailű Keycloak-belépéskor töltődik ki (app.api.deps._link_keycloak_user); a kulcs
+    # továbbra is az e-mail – ez csak az összekötés ténye / audit.
+    keycloak_sub = Column(String(64), nullable=True, unique=True, index=True)
+
     # Mentett számlázási profil (ugyanazok a mezők, mint a ChargingIntent-en)
     billing_type = Column(String(16), nullable=True)          # "personal" | "business"
     billing_name = Column(String(255), nullable=True)

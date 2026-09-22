@@ -12,3 +12,5 @@ email-validator==2.3.0
 stripe==14.4.0
 httpx==0.28.1
 szamlazz.py==1.5.1
+# Keycloak access token ellenőrzés (app/services/keycloak.py); a [crypto] a cryptography csomagot húzza be.
+PyJWT[crypto]==2.14.0

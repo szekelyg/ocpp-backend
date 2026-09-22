@@ -5,14 +5,16 @@ import os
 from datetime import datetime, timezone, timedelta
 
 import stripe
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, EmailStr
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db
+from app.api.deps import Identity, get_db, get_optional_identity
 from app.api.routers.charge_points import compute_status
-from app.db.models import ChargePoint, ChargingIntent
+from app.db.models import ChargePoint, ChargingIntent, User
 from app.services.auth_tokens import issue_intent_token
 
 logger = logging.getLogger("intents")
@@ -46,16 +48,19 @@ def _get_env(name: str) -> str:
 class CreateIntentIn(BaseModel):
     charge_point_id: int = Field(..., ge=1)
     connector_id: int = Field(1, ge=0)  # 0 is lehet (szimulátor)
-    email: EmailStr
+    # Vendégnek kötelező. Bejelentkezve (Bearer: e-mail-token vagy Keycloak) a fiók e-mailje
+    # számít, a body-beli értéket figyelmen kívül hagyjuk – a session így a fiókhoz kötődik.
+    email: Optional[EmailStr] = None
     hold_amount_huf: int = Field(5000, ge=1000, le=25000)
 
-    # Számlázás – mindig kötelező
+    # Számlázás – mindig kötelező. Bejelentkezve a hiányzó mezők a users-beli mentett
+    # profilból egészülnek ki (_billing_from_body_or_profile), vendégnek mind kell.
     billing_type: str = Field("personal", pattern=r"^(personal|business)$")
-    billing_name: str = Field(..., min_length=2, max_length=255)
-    billing_street: str = Field(..., min_length=2, max_length=255)
-    billing_zip: str = Field(..., min_length=2, max_length=16)
-    billing_city: str = Field(..., min_length=1, max_length=128)
-    billing_country: str = Field("HU", min_length=2, max_length=4)
+    billing_name: Optional[str] = Field(None, min_length=2, max_length=255)
+    billing_street: Optional[str] = Field(None, min_length=2, max_length=255)
+    billing_zip: Optional[str] = Field(None, min_length=2, max_length=16)
+    billing_city: Optional[str] = Field(None, min_length=1, max_length=128)
+    billing_country: Optional[str] = Field("HU", min_length=2, max_length=4)
     # Csak céges számlánál
     billing_company: str | None = Field(None, max_length=255)
     billing_tax_number: str | None = Field(None, max_length=64)
@@ -65,8 +70,60 @@ class CreateIntentIn(BaseModel):
     save_profile: bool = False
 
 
+_BILLING_REQUIRED = ("billing_name", "billing_street", "billing_zip", "billing_city", "billing_country")
+
+
+async def _billing_from_body_or_profile(
+    body: CreateIntentIn, ident: Optional[Identity], db: AsyncSession
+) -> dict:
+    """Számlázási mezők: a body-ból; bejelentkezve a hiányzók a mentett profilból. 422, ha így is hiányzik."""
+    fields = {
+        "billing_type": body.billing_type,
+        "billing_name": body.billing_name,
+        "billing_street": body.billing_street,
+        "billing_zip": body.billing_zip,
+        "billing_city": body.billing_city,
+        "billing_country": body.billing_country,
+        "billing_company": body.billing_company,
+        "billing_tax_number": body.billing_tax_number,
+    }
+    if ident is not None and any(not fields[k] for k in _BILLING_REQUIRED):
+        user = (await db.execute(select(User).where(User.email == ident.email))).scalar_one_or_none()
+        if user is not None:
+            for k in ("billing_name", "billing_street", "billing_zip", "billing_city", "billing_country"):
+                if not fields[k]:
+                    fields[k] = getattr(user, k)
+            if body.billing_type == "business":
+                fields["billing_company"] = fields["billing_company"] or user.billing_company
+                fields["billing_tax_number"] = fields["billing_tax_number"] or user.billing_tax_number
+    missing = [k for k in _BILLING_REQUIRED if not fields[k]]
+    if missing:
+        raise HTTPException(status_code=422, detail={"error": "billing_missing", "fields": missing})
+    if fields["billing_type"] == "business":
+        biz_missing = [k for k in ("billing_company", "billing_tax_number") if not fields[k]]
+        if biz_missing:
+            raise HTTPException(status_code=422, detail={"error": "billing_missing", "fields": biz_missing})
+    else:
+        fields["billing_company"] = None
+        fields["billing_tax_number"] = None
+    return fields
+
+
 @router.post("/", response_model=dict)
-async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)):
+async def create_intent(
+    body: CreateIntentIn,
+    db: AsyncSession = Depends(get_db),
+    ident: Optional[Identity] = Depends(get_optional_identity),
+):
+    # 0) Kinek a nevében? Bejelentkezve (Keycloak / e-mail-token) a fiók e-mailje – SSO-felismerés.
+    if ident is not None:
+        email = ident.email
+    elif body.email:
+        email = str(body.email).strip().lower()
+    else:
+        raise HTTPException(status_code=422, detail={"error": "email_required"})
+    billing = await _billing_from_body_or_profile(body, ident, db)
+
     # 1) CP ellenőrzés
     cp = (
         (await db.execute(select(ChargePoint).where(ChargePoint.id == body.charge_point_id)))
@@ -106,13 +163,13 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
             select(func.count())
             .select_from(ChargingIntent)
             .where(
-                ChargingIntent.anonymous_email == str(body.email),
+                ChargingIntent.anonymous_email == email,
                 ChargingIntent.created_at > _utcnow() - timedelta(seconds=INTENT_RATE_WINDOW_S),
             )
         )
     ).scalar_one()
     if recent >= INTENT_RATE_MAX_PER_EMAIL:
-        logger.warning("intent rate limit hit email=%s recent=%s", body.email, recent)
+        logger.warning("intent rate limit hit email=%s recent=%s", email, recent)
         raise HTTPException(
             status_code=429,
             detail={
@@ -125,18 +182,11 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
     intent = ChargingIntent(
         charge_point_id=cp.id,
         connector_id=int(body.connector_id),
-        anonymous_email=str(body.email),
+        anonymous_email=email,
         status="pending_payment",
         hold_amount_huf=int(body.hold_amount_huf),
         expires_at=_utcnow() + timedelta(minutes=15),
-        billing_type=body.billing_type,
-        billing_name=body.billing_name,
-        billing_street=body.billing_street,
-        billing_zip=body.billing_zip,
-        billing_city=body.billing_city,
-        billing_country=body.billing_country,
-        billing_company=body.billing_company if body.billing_type == "business" else None,
-        billing_tax_number=body.billing_tax_number if body.billing_type == "business" else None,
+        **billing,
     )
     db.add(intent)
 
@@ -166,7 +216,7 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
 
         product_name = (
             "EV töltési előleg – céges számla"
-            if body.billing_type == "business"
+            if billing["billing_type"] == "business"
             else "EV töltési előleg"
         )
 
@@ -174,7 +224,7 @@ async def create_intent(body: CreateIntentIn, db: AsyncSession = Depends(get_db)
             "mode": "payment",
             "success_url": f"{base_url}/pay/success?intent_id={intent.id}&t={intent_token}",
             "cancel_url": f"{base_url}/pay/cancel?intent_id={intent.id}",
-            "customer_email": str(body.email),
+            "customer_email": email,
             "client_reference_id": str(intent.id),
             "metadata": meta,
             "line_items": [

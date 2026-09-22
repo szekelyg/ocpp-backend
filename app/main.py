@@ -17,6 +17,8 @@ from app.api.routers.payments_stripe import router as payments_stripe_router
 from app.api.routers.intents import router as intents_router
 from app.api.routers.admin import router as admin_router
 from app.api.routers.auth import router as auth_router
+from app.api.routers.me import router as me_router
+from app.core.cors import PathScopedCORS, portal_origins
 from app.ocpi.router import router as ocpi_router
 from app.ocpi.errors import add_ocpi_exception_handlers
 from app.ocpp.ocpp_ws import handle_ocpp
@@ -289,6 +291,19 @@ app.include_router(payments_stripe_router, prefix="/api")
 app.include_router(intents_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
+app.include_router(me_router, prefix="/api")
+
+# CORS csak a /api/me/* útvonalon, a portál (my.energiafelho.hu) originjére: Bearer token,
+# cookie nélkül (allow_credentials=False). A többi végpont CORS-viselkedése változatlan.
+app.add_middleware(
+    PathScopedCORS,
+    path_prefix="/api/me",
+    allow_origins=portal_origins(),
+    allow_methods=["GET", "OPTIONS"],
+    allow_headers=["Authorization", "Accept", "Content-Type"],
+    allow_credentials=False,
+    max_age=600,
+)
 
 # OCPI 2.2.1 (CPO role) – own "/ocpi" prefix, sibling of "/api"
 app.include_router(ocpi_router)

@@ -12,12 +12,12 @@ from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import get_db
+from app.api.deps import email_from_authorization, get_db
 from app.api.routers.admin import verify_admin
 from app.db.models import ChargePoint, ChargeSession, MeterSample
 from app.ocpp.ocpp_ws import remote_start_transaction, remote_stop_transaction
 from app.ocpp.ocpp_utils import MIN_CHARGE_HUF, _price_huf_per_kwh
-from app.services.auth_tokens import verify_intent_token, verify_token
+from app.services.auth_tokens import verify_intent_token
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -368,18 +368,21 @@ async def get_session(
     return _session_to_dict(s, s.charge_point, power_w=power_w, hold_amount_huf=hold, phases=phases)
 
 
-def _may_stop_session(s: ChargeSession, body: Optional[StopPublicIn], authorization: Optional[str]) -> bool:
+async def _may_stop_session(
+    s: ChargeSession, body: Optional[StopPublicIn], authorization: Optional[str], db: AsyncSession
+) -> bool:
     """Csak az állíthatja le a töltést, aki indította.
 
     Két bizonyíték fogadható el (bejelentkezés egyikhez sem kell):
       1) intent-token – a fizetéskor kiadott, aláírt token (success_url / e-mail link),
-      2) Bearer e-mail-token (OTP-s belépés), ha az e-mail egyezik a session indítójával.
+      2) Bearer token – e-mail-kódos (v1) VAGY Keycloak access token –, ha a bejelentkezett
+         fiók e-mailje egyezik a session indítójával.
     Admin leállításra az /api/admin/sessions/{id}/stop való.
     """
     if body and body.token and verify_intent_token(body.token, s.intent_id):
         return True
-    if authorization and authorization.lower().startswith("bearer ") and s.anonymous_email:
-        email = verify_token(authorization.split(" ", 1)[1].strip())
+    if authorization and s.anonymous_email:
+        email = await email_from_authorization(authorization, db)
         if email and email == s.anonymous_email.strip().lower():
             return True
     return False
@@ -402,7 +405,7 @@ async def stop_session_public(
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if not _may_stop_session(s, body, authorization):
+    if not await _may_stop_session(s, body, authorization, db):
         raise HTTPException(
             status_code=403,
             detail={

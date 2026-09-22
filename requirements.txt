@@ -12,3 +12,5 @@ email-validator
 stripe>=7.0
 httpx>=0.27
 szamlazz.py>=1.5
+# Keycloak (egységes Energiafelhő-fiók) access token ellenőrzés – JWKS + RS/ES aláírás
+PyJWT[crypto]>=2.10
