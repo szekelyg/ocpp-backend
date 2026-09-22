@@ -3,7 +3,8 @@ import StatusBadge from "../ui/StatusBadge";
 import { placeLines, timeAgo } from "../../utils/format";
 import { isPowerLimited, TYPE2_NOMINAL_KW } from "../../utils/power";
 import PayModal from "../ui/PayModal";
-import LoginAutofill, { AUTH_TOKEN_KEY } from "../ui/LoginAutofill";
+import LoginAutofill from "../ui/LoginAutofill";
+import { apiFetch, authSource, clearAuth, isLoggedIn, onAuthChange } from "../../utils/auth";
 
 const STARTABLE = new Set(["available", "preparing", "finishing"]);
 
@@ -54,6 +55,10 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
   // "Adataim mentése legközelebbre" pipa (regisztráció). Kártyaadatot SOHA nem mentünk.
   const [saveProfile, setSaveProfile] = useState(false);
 
+  // Bejelentkezett fiók (Energiafelhő-fiók vagy e-mail-kód): { email, source }. Ilyenkor a
+  // backend a fiók e-mailjére köti a töltést (a body-beli e-mailt figyelmen kívül hagyja).
+  const [account, setAccount] = useState(null);
+
   const lines = useMemo(() => (cp ? placeLines(cp) : ["", ""]), [cp]);
   const canStart = cp && isStartable(cp.status) && !busy;
 
@@ -72,26 +77,24 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
     if (profile.billing_tax_number) setBillingTaxNumber(profile.billing_tax_number);
   }, []);
 
-  // Ha van érvényes token (korábbi belépés), automatikusan előtöltjük az adatokat.
+  // Ha be van lépve (korábbi belépés bármelyik módon), automatikusan előtöltjük az adatokat
+  // a /api/me-ből; 401-re az apiFetch kiüríti a lejárt tokent.
   useEffect(() => {
-    let token = "";
-    try { token = localStorage.getItem(AUTH_TOKEN_KEY) || ""; } catch { /* ignore */ }
-    if (!token) return;
     let cancelled = false;
-    (async () => {
+    async function loadMe() {
+      if (!isLoggedIn()) { if (!cancelled) setAccount(null); return; }
       try {
-        const res = await fetch("/api/auth/profile", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.status === 401) {
-          try { localStorage.removeItem(AUTH_TOKEN_KEY); } catch { /* ignore */ }
-          return;
-        }
+        const res = await apiFetch("/api/me", { headers: { Accept: "application/json" } });
+        if (!res.ok) { if (!cancelled) setAccount(null); return; }
         const data = await res.json().catch(() => ({}));
-        if (!cancelled && res.ok && data?.profile) applyProfile(data.profile, data.profile.email);
+        if (cancelled || !data?.email) return;
+        setAccount({ email: data.email, source: data.auth_source || authSource() });
+        applyProfile(data.profile || null, data.email);
       } catch { /* offline / hiba – néma */ }
-    })();
-    return () => { cancelled = true; };
+    }
+    loadMe();
+    const off = onAuthChange(loadMe);
+    return () => { cancelled = true; off(); };
   }, [applyProfile]);
 
   useEffect(() => {
@@ -144,7 +147,8 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
 
     setBusy(true);
     try {
-      const res = await fetch("/api/intents/", {
+      // Bejelentkezve Bearer megy (a backend a fiók e-mailjét használja); vendégként nem.
+      const res = await apiFetch("/api/intents/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -165,6 +169,12 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
       });
 
       const data = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        // Lejárt/érvénytelen belépés – nem esünk vissza csendben vendég-módba.
+        clearAuth();
+        setAccount(null);
+        throw new Error("A belépésed lejárt. Lépj be újra, vagy indítsd a töltést vendégként (a megadott e-mail-címmel).");
+      }
       if (!res.ok) {
         throw new Error(
           typeof data?.detail === "string"
@@ -375,13 +385,31 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
             Számlázási adatok
           </div>
 
-          {/* Belépés mentett adatokkal (email kód) – automatikus kitöltés */}
+          {/* Belépés mentett adatokkal (Energiafelhő-fiók vagy e-mail-kód) – automatikus kitöltés */}
           <div className="mb-4">
-            <LoginAutofill
-              defaultEmail={email}
-              disabled={busy}
-              onLoggedIn={(profile, loginEmail) => applyProfile(profile, loginEmail)}
-            />
+            {account ? (
+              <div className="rounded-xl border border-brand-green/40 bg-[#e6faf4] px-3 py-2.5 text-xs text-[#037a5c] flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate">
+                  ✓ Belépve: <span className="font-semibold">{account.email}</span>
+                  {account.source === "keycloak" ? " (Energiafelhő-fiók)" : ""}
+                  {" "}— a töltés ehhez a fiókhoz kerül.
+                </span>
+                <button type="button" className="shrink-0 underline hover:no-underline" disabled={busy}
+                  onClick={() => { clearAuth(); setAccount(null); }}>
+                  Vendégként
+                </button>
+              </div>
+            ) : (
+              <LoginAutofill
+                defaultEmail={email}
+                disabled={busy}
+                returnTo={`/?cp=${cp.id}`}
+                onLoggedIn={(profile, loginEmail) => {
+                  setAccount({ email: loginEmail, source: "email_token" });
+                  applyProfile(profile, loginEmail);
+                }}
+              />
+            )}
           </div>
 
           {/* Számla típusa */}
@@ -534,10 +562,16 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="pelda@domain.hu"
-              disabled={busy}
+              disabled={busy || !!account}
+              readOnly={!!account}
               type="email"
             />
           </Field>
+          {account && (
+            <div className="mt-1 text-xs text-ink-muted">
+              Bejelentkezve a fiók e-mail-címe érvényes; a töltés a „Töltéseim” oldalon is megjelenik.
+            </div>
+          )}
 
           {/* Adatok mentése legközelebbre (regisztráció) */}
           <label className="mt-3 flex items-start gap-3 cursor-pointer select-none">

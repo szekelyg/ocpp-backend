@@ -8,6 +8,8 @@ import AdminPage from "./pages/AdminPage.jsx";
 import Aszf from "./pages/Aszf.jsx";
 import Adatkezeles from "./pages/Adatkezeles.jsx";
 import NotFound from "./pages/NotFound.jsx";
+import MySessions from "./pages/MySessions.jsx";
+import KeycloakCallback from "./pages/KeycloakCallback.jsx";
 
 export default function App() {
   return (
@@ -19,6 +21,8 @@ export default function App() {
       <Route path="/admin" element={<AdminPage />} />
       <Route path="/aszf" element={<Aszf />} />
       <Route path="/adatkezeles" element={<Adatkezeles />} />
+      <Route path="/toltesek" element={<MySessions />} />
+      <Route path="/auth/keycloak/callback" element={<KeycloakCallback />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

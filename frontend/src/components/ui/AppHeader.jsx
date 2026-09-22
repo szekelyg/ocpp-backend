@@ -1,4 +1,32 @@
+import { Link } from "react-router-dom";
 import CloudLogo from "./CloudLogo";
+import useAuth from "../../hooks/useAuth";
+
+function AccountArea() {
+  const { me, loggedIn, logout } = useAuth();
+  if (!loggedIn) {
+    return (
+      <Link to="/toltesek" className="btn btnGhost !py-1.5 !px-3 !text-xs">
+        Belépés / Töltéseim
+      </Link>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <Link to="/toltesek" className="btn btnGhost !py-1.5 !px-3 !text-xs max-w-[200px]">
+        <span className="truncate">{me?.email}</span>
+      </Link>
+      <button
+        type="button"
+        onClick={() => logout({ redirectTo: "/" })}
+        className="text-xs text-ink-muted hover:text-brand-action transition"
+        title="Kijelentkezés"
+      >
+        Kilépés
+      </button>
+    </div>
+  );
+}
 
 export default function AppHeader() {
   // z-[1100]: a Leaflet paneljei 400-on, a térkép-vezérlői 1000-en ülnek, ezért egy
@@ -18,7 +46,10 @@ export default function AppHeader() {
             </span>
           </span>
         </a>
-        <span className="text-xs text-ink-muted hidden sm:block">EV töltőhálózat</span>
+        <div className="flex items-center gap-4">
+          <span className="text-xs text-ink-muted hidden md:block">EV töltőhálózat</span>
+          <AccountArea />
+        </div>
       </div>
       <div className="accentLine" />
     </header>

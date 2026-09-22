@@ -3,14 +3,16 @@
 // mentett SZÁMLÁZÁSI profilt, amivel a szülő automatikusan kitölti az űrlapot.
 // Kártyaadatot sehol nem kezel.
 import { useState } from "react";
+import KeycloakLoginButton from "./KeycloakLoginButton";
+import { AUTH_TOKEN_KEY, setEmailToken } from "../../utils/auth";
 
-export const AUTH_TOKEN_KEY = "ef_auth_token";
+export { AUTH_TOKEN_KEY };
 
 const inputCls = "field";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export default function LoginAutofill({ defaultEmail = "", onLoggedIn, disabled = false }) {
+export default function LoginAutofill({ defaultEmail = "", onLoggedIn, disabled = false, returnTo }) {
   // "collapsed" | "email" | "code" | "done"
   const [step, setStep] = useState("collapsed");
   const [email, setEmail] = useState(defaultEmail);
@@ -63,7 +65,7 @@ export default function LoginAutofill({ defaultEmail = "", onLoggedIn, disabled 
             : "A kód nem megfelelő."
         );
       }
-      try { localStorage.setItem(AUTH_TOKEN_KEY, data.token); } catch { /* ignore */ }
+      setEmailToken(data.token);
       setStep("done");
       setInfo(
         data.profile
@@ -88,14 +90,19 @@ export default function LoginAutofill({ defaultEmail = "", onLoggedIn, disabled 
 
   if (step === "collapsed") {
     return (
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => { setErr(""); setStep("email"); }}
-        className="w-full rounded-xl border border-brand-line bg-brand-panel px-3 py-2.5 text-sm text-ink-soft hover:border-brand-blue/60 disabled:opacity-50"
-      >
-        Már mentetted az adataidat? <span className="font-semibold text-brand-action">Belépés →</span>
-      </button>
+      <div className="space-y-2">
+        {/* Egységes Energiafelhő-fiók (Keycloak) – csak ha a backend szerint elérhető */}
+        <KeycloakLoginButton returnTo={returnTo} disabled={disabled} onError={setErr} />
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => { setErr(""); setStep("email"); }}
+          className="w-full rounded-xl border border-brand-line bg-brand-panel px-3 py-2.5 text-sm text-ink-soft hover:border-brand-blue/60 disabled:opacity-50"
+        >
+          Már mentetted az adataidat? <span className="font-semibold text-brand-action">Belépés e-mail-kóddal →</span>
+        </button>
+        {err && <div className="text-sm text-rose-600">{err}</div>}
+      </div>
     );
   }
 

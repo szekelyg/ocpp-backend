@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import AppHeader from "../components/ui/AppHeader";
 import StatusBadge from "../components/ui/StatusBadge";
-import { AUTH_TOKEN_KEY } from "../components/ui/LoginAutofill";
+import { authHeaders } from "../utils/auth";
 
 const POLL_MS = 3_000;
 const WAITING_TIMEOUT_S = 15 * 60; // 15 perc
@@ -114,12 +114,9 @@ export default function ChargingPage() {
     setStopBusy(true);
     setStopErr("");
     try {
-      const headers = { "Content-Type": "application/json" };
-      // Tartalék: ha e-mail-kóddal be van lépve, a saját e-mailjéhez tartozó töltést
-      // ezzel is leállíthatja (pl. régi, token nélküli link esetén).
-      let authToken = "";
-      try { authToken = localStorage.getItem(AUTH_TOKEN_KEY) || ""; } catch { /* ignore */ }
-      if (authToken) headers.Authorization = `Bearer ${authToken}`;
+      // Tartalék: ha be van lépve (e-mail-kód vagy Energiafelhő-fiók), a saját e-mailjéhez
+      // tartozó töltést ezzel is leállíthatja (pl. régi, token nélküli link esetén).
+      const headers = { "Content-Type": "application/json", ...(await authHeaders()) };
       const res = await fetch(`/api/sessions/${sessionId}/stop`, {
         method: "POST",
         headers,
