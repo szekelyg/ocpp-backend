@@ -66,7 +66,7 @@ ezért ott is bekerült a token a `success_url`-be.
 | `POST /api/sessions/stop` | senki (admin eszköz) | admin Basic | változatlan |
 | `POST /api/intents/` | SelectedChargerCard (vendég), | nincs; `save_profile` → azonnali `users` upsert | publikus marad; **`users`-írás átkerült a fizetett webhookba** (Stripe metadata `save_profile`); **e-mail-enkénti throttle**: max 10 intent / 15 perc / e-mail (429) |
 | `POST /api/payments/stripe/webhook` | Stripe | aláírás | változatlan (+ profil mentése `save_profile=="1"` esetén) |
-| `POST /api/auth/request-code`, `verify-code` | LoginAutofill | DB-cooldown 45 s, max 5 próbálkozás | változatlan |
+| `POST /api/auth/request-code`, `verify-code` | LoginAutofill | DB-cooldown 45 s, max 5 próbálkozás | változatlan *(2026-09-22 óta: megszűnt, 410 – a fiókos belépés csak Keycloak, lásd `KEYCLOAK.md` 0.)* |
 | `GET /api/auth/profile` | SelectedChargerCard | Bearer | változatlan |
 | `/api/admin/*` | AdminPage | admin Basic | változatlan |
 

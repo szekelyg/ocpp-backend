@@ -1,12 +1,12 @@
 // frontend/src/hooks/useAuth.js
-// A bejelentkezett fiók (/api/me) React-oldali állapota. Bármelyik tokenfajtával működik.
+// A bejelentkezett fiók (/api/me) React-oldali állapota – Energiafelhő-fiók (Keycloak).
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, authSource, isLoggedIn, logout as doLogout, onAuthChange } from "../utils/auth";
 
 export default function useAuth() {
   const [me, setMe] = useState(null);          // { email, name, profile, keycloak_linked, auth_source }
   const [loading, setLoading] = useState(isLoggedIn());
-  const [source, setSource] = useState(authSource());
+  const [source, setSource] = useState(authSource());   // "keycloak" | null
 
   const reload = useCallback(async () => {
     setSource(authSource());

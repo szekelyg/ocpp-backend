@@ -1,9 +1,23 @@
 # Egységes Energiafelhő-fiók (Keycloak) az ev.energiafelho.hu-n
 
-Ág: `w4-keycloak`. A töltő-backend a meglévő e-mail-kódos belépés **mellett** elfogadja a
-`https://id.energiafelho.hu` (realm `ugyfelek`) access tokenjeit, a SPA-ban van
-„Belépés Energiafelhő-fiókkal" gomb, és van egy `GET /api/me/sessions` végpont, amit a
-portál (my.energiafelho.hu) is hív. A vendég (regisztráció nélküli) út változatlan.
+A töltő-backend a `https://id.energiafelho.hu` (realm `ugyfelek`) access tokenjeit fogadja el
+bejelentkezésként, a SPA-ban a „Belépés Energiafelhő-fiókkal" gomb az egyetlen fiókos belépés,
+és van egy `GET /api/me/sessions` végpont, amit a portál (my.energiafelho.hu) is hív.
+
+## 0. Belépés-modell (2026-09-22-től, TERV-egy-fiok C. fázis)
+
+| Út | Állapot |
+|---|---|
+| **Energiafelhő-fiók (Keycloak)** | **Az egyetlen fiókos belépés.** Ugyanaz az út fiókkal és fiók nélkül: e-mail-cím, (első alkalommal) név, 6 jegyű kód – jelszó nincs. A SPA a gomb alatt ezt egy mondatban el is mondja. |
+| **Vendég-töltés** (regisztráció nélkül, bankkártyával) | Változatlan: `POST /api/intents/` e-mail + számlázási adatok, Stripe, majd a töltés-oldal. |
+| **Nyugta-/leállítási link** a töltés után (`/charging/{id}?t=<intent-token>`, `v1i`) | Változatlan, fiók nélkül működik (lásd `docs/SESSIONS_AUTH_ELEMZES.md`). |
+| Régi, saját **e-mail-kódos belépés** (`POST /api/auth/request-code`, `POST /api/auth/verify-code`) | **Megszűnt.** Mindkét végpont HTTP **410** `{"error":"retired","message":"A régi e-mail-kódos belépés megszűnt. Lépj be az Energiafelhő-fiókoddal."}`; kódot nem küldünk, nem ellenőrzünk (`login_codes` táblába nem írunk). A SPA-ból a régi belépő (LoginAutofill) kikerült, a `localStorage.ef_auth_token` kulcsot a SPA betöltéskor törli. |
+| Korábban kiadott **v1 e-mail-tokenek** | A Bearer-t fogadó végpontok (`/api/me/*`, `/api/intents/`, `/api/sessions/{id}/stop`, `/api/auth/profile`) a **lejáratukig (30 nap) még elfogadják** – nincs mit visszavonni, maguktól lejárnak; a SPA viszont már nem küldi őket. Ha a 30 nap letelt, az `app/api/deps.py` v1 ága és az `issue_token`/`verify_token` törölhető. |
+
+Miért maradt a v1 elfogadása? Egy ötsoros ág a `deps.py`-ban, saját titokkal aláírt, 30 napos
+token; a kivétele semmit nem tenne biztonságosabbá (kiadni már nem lehet), viszont a portál/SPA
+felől egy ideig még érkezhet ilyen Bearer. A tesztek is ezzel a tokennel állítanak elő
+„bejelentkezett" identitást Keycloak-mock nélkül.
 
 ## 1. Keycloak-beállítás (realm `ugyfelek`)
 
@@ -63,8 +77,8 @@ KEYCLOAK_ALLOWED_AZP=portal          # a portál Keycloak-kliensének ID-ja (az 
 
 - **Fail-closed:** `KEYCLOAK_ISSUER` nélkül minden JWT-nek kinéző token 401
   (`keycloak_keycloak_disabled`), a SPA-ban a gomb nem jelenik meg
-  (`GET /api/auth/keycloak/config` → `{"enabled": false}`). Az e-mail-kódos belépés és a
-  vendég-folyamat ettől függetlenül működik.
+  (`GET /api/auth/keycloak/config` → `{"enabled": false}`), a SPA ilyenkor „A fiókos belépés
+  jelenleg nem elérhető" szöveget mutat. A vendég-folyamat ettől függetlenül működik.
 - Új Python-függőség: `PyJWT[crypto]` (`requirements.txt`, `deploy/requirements.txt` pinned).
   A Docker build magától felrakja.
 - Migráció: `e5c1a7b3d9f2` – `users.keycloak_sub` (nullable, unique). Additív; az
@@ -73,7 +87,8 @@ KEYCLOAK_ALLOWED_AZP=portal          # a portál Keycloak-kliensének ID-ja (az 
 ## 3. Hogyan ellenőrzi a backend a tokent (`app/services/keycloak.py`)
 
 1. `Authorization: Bearer <token>`. Ha a token `v1.`/`v1i.` prefixű (4 szegmens) → a régi
-   HMAC-ellenőrzés (`auth_tokens.verify_token`), különben Keycloak-JWT.
+   HMAC-ellenőrzés (`auth_tokens.verify_token`; csak a még le nem járt, 2026-09-22 előtti
+   e-mail-tokenek), különben Keycloak-JWT.
 2. Fejléc: `alg` ∈ RS256/384/512, ES256/384/512 (`none`, HS* tiltva – a nyilvános kulccsal
    „aláírt" HS-token nem játszik), `kid` kötelező.
 3. JWKS a `{issuer}/protocol/openid-connect/certs`-ről, processzenként cache-elve
@@ -111,7 +126,7 @@ A SPA ebből indítja a PKCE-folyamatot; discovery-t a backend olvassa (6 órás
 
 ```json
 { "ok": true, "email": "ugyfel@example.hu", "name": "Ügyfél Ubul",
-  "auth_source": "keycloak" | "email_token", "keycloak_linked": true,
+  "auth_source": "keycloak" | "email_token" (utóbbi csak régi, még le nem járt v1 tokennel), "keycloak_linked": true,
   "profile": { "email", "billing_type", "billing_name", "billing_street", "billing_zip",
                "billing_city", "billing_country", "billing_company", "billing_tax_number" } | null }
 ```
@@ -170,17 +185,22 @@ const { sessions, total_kwh, total_huf } = await r.json();
   kötelező). Rossz/lejárt Bearer → 401 (a SPA ilyenkor törli a helyi belépést és a felhasználó
   vendégként folytathatja).
 - `POST /api/sessions/{id}/stop` – intent-token **vagy** a tulajdonos Bearer-je (mindkét fajta).
-- `GET /api/auth/profile` – változatlan (csak e-mail-token); a SPA már a `/api/me`-t használja.
+- `GET /api/auth/profile` – marad (csak v1 e-mail-token); a SPA a `/api/me`-t használja.
+- `POST /api/auth/request-code`, `POST /api/auth/verify-code` – **410, megszűnt** (lásd 0.).
 
 ## 5. SPA (frontend)
 
-- `src/utils/auth.js`: token-tárolás (`localStorage.ef_auth_token` = e-mail-token, ahogy eddig;
-  `localStorage.ef_kc_session` = Keycloak access/refresh/id token + lejárat), PKCE indítás
+- `src/utils/auth.js`: token-tárolás (`localStorage.ef_kc_session` = Keycloak access/refresh/id
+  token + lejárat; a régi `ef_auth_token` kulcsot csak törli), PKCE indítás
   (`startKeycloakLogin({ returnTo })`), callback (`completeKeycloakLogin`), access token
   frissítés refresh tokennel 30 mp-cel a lejárat előtt, `apiFetch` (Bearer + 401-re törlés),
   `logout()` → Keycloak end-session `id_token_hint`-tel, majd vissza.
 - Útvonalak: `/auth/keycloak/callback`, `/toltesek` („Töltéseim"). Fejlécben „Belépés /
   Töltéseim", belépve az e-mail + „Kilépés".
+- `src/components/ui/AccountLogin.jsx`: a Keycloak-gomb (`KeycloakLoginButton`) + a mondat
+  „Nincs még Energiafelhő-fiókod? Ugyanez az út: e-mail-cím, név, 6 jegyű kód — jelszó nem kell."
+  Ezt használja a Töltéseim oldal és a töltés-indító kártya (`SelectedChargerCard`). A kártyán a
+  belépett állapot (`account`) csak Keycloak-forrásból jöhet (`isLoggedIn()` = van Keycloak-session).
 - Töltő fizetési űrlap: belépve a `/api/me` profilja előtöltve, az e-mail mező csak olvasható,
   „Vendégként" gombbal elengedhető. A „Belépés Energiafelhő-fiókkal" gomb a `?cp=<id>`
   útvonalra hoz vissza, ami újra megnyitja a fizetési ablakot.
@@ -195,10 +215,12 @@ run --rm --no-deps backend pytest`): saját RSA-kulcspár + mockolt JWKS/discove
 (`httpx.AsyncClient` helyettesítve); elutasított tokenek: lejárt, rossz `iss`, rossz
 `aud`/`azp`, `none`, HS256 a nyilvános kulccsal, idegen kulcs, ismeretlen `kid` (+ újratöltés
 throttle), ID/refresh `typ`, hiányzó `exp`/`email`; `email_verified=false` → 403 és nincs
-összekötés; kikapcsolt Keycloak → 401, e-mail-token továbbra is jó; `/api/me/sessions` csak
+összekötés; kikapcsolt Keycloak → 401, régi v1 e-mail-token továbbra is jó; `/api/me/sessions` csak
 saját e-mail (kis/nagybetű független), lapozás, összesítés, számla-PDF csak sajátra; CORS csak
 `/api/me/*` + portál origin; stop Keycloak-tokennel; intents SSO (fiók e-mail + profil), vendég
-kötelező mezők, rossz Bearer → 401. A korábbi 78 teszt változatlanul zöld (összesen 108).
+kötelező mezők, rossz Bearer → 401.
+`tests/test_auth_retired.py`: a két régi kódos végpont 410-e (body-tól függetlenül), nem ír
+`login_codes`-t, a config- és profil-végpont marad.
 
 ## 7. Élesítés
 

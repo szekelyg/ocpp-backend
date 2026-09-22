@@ -1,11 +1,11 @@
 // frontend/src/pages/MySessions.jsx
-// "Töltéseim": a bejelentkezett fiók (Energiafelhő-fiók vagy e-mail-kód) töltései a
+// "Töltéseim": a bejelentkezett Energiafelhő-fiók töltései a
 // GET /api/me/sessions végpontból – lapozva, összesítéssel, számla-letöltéssel.
 import { useCallback, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import AppHeader from "../components/ui/AppHeader";
 import AppFooter from "../components/ui/AppFooter";
-import LoginAutofill from "../components/ui/LoginAutofill";
+import AccountLogin from "../components/ui/AccountLogin";
 import useAuth from "../hooks/useAuth";
 import { apiFetch } from "../utils/auth";
 import { formatHu } from "../utils/format";
@@ -98,7 +98,7 @@ function SessionRow({ s, onInvoice, invoiceBusy }) {
 }
 
 export default function MySessions() {
-  const { me, loading: authLoading, loggedIn, source, logout, reload } = useAuth();
+  const { me, loading: authLoading, loggedIn, logout } = useAuth();
   const location = useLocation();
 
   const [data, setData] = useState(null);       // { sessions, total, total_kwh, total_huf }
@@ -173,11 +173,10 @@ export default function MySessions() {
           <div className="card">
             <div className="cardHeader">
               <div className="cardTitle">Belépés</div>
-              <div className="cardSub mt-0.5">Válaszd az Energiafelhő-fiókot, vagy kérj belépési kódot e-mailben.</div>
+              <div className="cardSub mt-0.5">A töltéseidhez az Energiafelhő-fiókoddal férsz hozzá.</div>
             </div>
             <div className="cardBody space-y-4">
-              {/* Energiafelhő-fiók gomb (ha van Keycloak) + e-mail-kódos út egyben */}
-              <LoginAutofill returnTo={returnTo} onLoggedIn={() => reload()} />
+              <AccountLogin returnTo={returnTo} />
               <p className="text-xs text-ink-muted">
                 Regisztráció nélkül is tölthetsz: a töltés után kapott e-mail linkjével bármikor
                 megnézheted az adott töltést.
@@ -195,8 +194,7 @@ export default function MySessions() {
                   <div className="kicker">Belépve</div>
                   <div className="font-semibold text-ink truncate">{me?.name || me?.email}</div>
                   <div className="text-xs text-ink-muted truncate">
-                    {me?.email}
-                    {source === "keycloak" ? " · Energiafelhő-fiók" : " · e-mail-kódos belépés"}
+                    {me?.email} · Energiafelhő-fiók
                   </div>
                 </div>
                 <button type="button" className="btn btnGhost" onClick={() => logout({ redirectTo: "/toltesek" })}>

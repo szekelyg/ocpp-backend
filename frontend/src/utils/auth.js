@@ -1,13 +1,15 @@
 // frontend/src/utils/auth.js
-// Bejelentkezés-kezelés egy helyen. Két tokenfajta él egymás mellett:
-//   1) e-mail-kódos HMAC-token (localStorage "ef_auth_token") – a régi vendég-út, változatlan;
-//   2) Keycloak (egységes Energiafelhő-fiók) – Authorization Code + PKCE, public kliens.
-//      A token-készletet (access/refresh/id) a localStorage "ef_kc_session" kulcs alatt
-//      tartjuk, az access tokent lejárat előtt a refresh tokennel frissítjük.
-// A backend mindkét tokent ugyanúgy, `Authorization: Bearer …`-ként fogadja (/api/me/*,
-// /api/intents/, /api/sessions/{id}/stop). Kártyaadat sehol nem szerepel.
+// Bejelentkezés-kezelés egy helyen. Egyetlen fiókos belépés van: az egységes
+// Energiafelhő-fiók (Keycloak) – Authorization Code + PKCE, public kliens. A token-készletet
+// (access/refresh/id) a localStorage "ef_kc_session" kulcs alatt tartjuk, az access tokent
+// lejárat előtt a refresh tokennel frissítjük. A backend `Authorization: Bearer …`-ként
+// fogadja (/api/me/*, /api/intents/, /api/sessions/{id}/stop). Kártyaadat sehol nem szerepel.
+//
+// A régi e-mail-kódos belépés (localStorage "ef_auth_token") 2026-09-22-én megszűnt: a kulcsot
+// itt már csak töröljük, belépettnek nem számít. A vendég-töltés és a nyugta-link (intent-token,
+// sessionStorage, lásd ChargingPage) ettől független.
 
-export const AUTH_TOKEN_KEY = "ef_auth_token";       // e-mail-kódos token (LoginAutofill írja)
+const LEGACY_EMAIL_TOKEN_KEY = "ef_auth_token";      // megszűnt e-mail-kódos token – csak takarítás
 export const KC_SESSION_KEY = "ef_kc_session";       // Keycloak tokenek
 const PKCE_KEY = "ef_kc_pkce";                       // sessionStorage: state + verifier + returnTo
 const CHANGE_EVENT = "ef-auth-change";
@@ -67,23 +69,19 @@ function writeKc(tokens) {
   return s;
 }
 
-export function setEmailToken(token) {
-  lsSet(AUTH_TOKEN_KEY, token);
-  notify();
-}
+// A megszűnt belépés ottmaradt tokenje: egyszer, betöltéskor kitakarítjuk.
+lsDel(LEGACY_EMAIL_TOKEN_KEY);
 
 /** Csak a helyi tárolót üríti (a Keycloak SSO-session megmarad). */
 export function clearAuth() {
-  lsDel(AUTH_TOKEN_KEY);
+  lsDel(LEGACY_EMAIL_TOKEN_KEY);
   lsDel(KC_SESSION_KEY);
   notify();
 }
 
-/** "keycloak" | "email_token" | null – szinkron, hálózat nélkül. */
+/** "keycloak" | null – szinkron, hálózat nélkül. */
 export function authSource() {
-  if (readKc()) return "keycloak";
-  if (lsGet(AUTH_TOKEN_KEY)) return "email_token";
-  return null;
+  return readKc() ? "keycloak" : null;
 }
 
 export function isLoggedIn() {
@@ -209,8 +207,6 @@ export async function completeKeycloakLogin(search) {
     redirect_uri: redirectUri(),
     code_verifier: saved.verifier,
   });
-  // Keycloak-belépés után a régi e-mail-token felesleges: egy identitás legyen.
-  lsDel(AUTH_TOKEN_KEY);
   writeKc(tokens);
   notify();
   return saved.returnTo || "/toltesek";
@@ -240,16 +236,14 @@ async function refreshKc(session) {
   return _refreshing;
 }
 
-/** Érvényes Bearer token (Keycloak – szükség esetén frissítve – vagy e-mail-token), különben "". */
+/** Érvényes Keycloak access token (szükség esetén frissítve), különben "". */
 export async function getAccessToken() {
   const kc = readKc();
-  if (kc) {
-    const now = Math.floor(Date.now() / 1000);
-    if (kc.expires_at - REFRESH_SKEW_S > now) return kc.access_token;
-    const fresh = await refreshKc(kc);
-    return fresh ? fresh.access_token : "";
-  }
-  return lsGet(AUTH_TOKEN_KEY) || "";
+  if (!kc) return "";
+  const now = Math.floor(Date.now() / 1000);
+  if (kc.expires_at - REFRESH_SKEW_S > now) return kc.access_token;
+  const fresh = await refreshKc(kc);
+  return fresh ? fresh.access_token : "";
 }
 
 /** `{ Authorization: "Bearer …" }` vagy `{}`. */

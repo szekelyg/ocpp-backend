@@ -38,7 +38,10 @@ ha lehet, ne aktív töltés közben (`select * from charge_sessions where finis
 ### Keycloak (egységes Energiafelhő-fiók)
 
 A backend a `KEYCLOAK_*` env-ekkel (lásd `.env.example`, részletek: `docs/KEYCLOAK.md`) fogadja az
-`id.energiafelho.hu` tokenjeit; enélkül a funkció ki van kapcsolva, minden más megy tovább. A
+`id.energiafelho.hu` tokenjeit. **Ez az egyetlen fiókos belépés** (2026-09-22-től): a régi
+e-mail-kódos `POST /api/auth/request-code` / `verify-code` 410-et ad; a vendég-töltés és a töltés
+utáni nyugta-link változatlan. `KEYCLOAK_ISSUER` nélkül a fiókos belépés ki van kapcsolva (a SPA
+ezt kiírja), a vendég-út megy tovább. A
 `deploy.sh` változatlan: a build felrakja a `PyJWT[crypto]`-t, az `entrypoint.sh` migrációja
 (`e5c1a7b3d9f2`, `users.keycloak_sub`) additív. Dev stackhez a `.env.dev`-be ugyanezek a sorok
 kerülnek, plusz a Keycloak `ev` kliensén `http://localhost:5173/auth/keycloak/callback` redirect URI.

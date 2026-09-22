@@ -114,7 +114,7 @@ export default function ChargingPage() {
     setStopBusy(true);
     setStopErr("");
     try {
-      // Tartalék: ha be van lépve (e-mail-kód vagy Energiafelhő-fiók), a saját e-mailjéhez
+      // Tartalék: ha be van lépve az Energiafelhő-fiókjával, a saját e-mailjéhez
       // tartozó töltést ezzel is leállíthatja (pl. régi, token nélküli link esetén).
       const headers = { "Content-Type": "application/json", ...(await authHeaders()) };
       const res = await fetch(`/api/sessions/${sessionId}/stop`, {

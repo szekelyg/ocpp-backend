@@ -3,8 +3,8 @@ import StatusBadge from "../ui/StatusBadge";
 import { placeLines, timeAgo } from "../../utils/format";
 import { isPowerLimited, TYPE2_NOMINAL_KW } from "../../utils/power";
 import PayModal from "../ui/PayModal";
-import LoginAutofill from "../ui/LoginAutofill";
-import { apiFetch, authSource, clearAuth, isLoggedIn, onAuthChange } from "../../utils/auth";
+import AccountLogin from "../ui/AccountLogin";
+import { apiFetch, clearAuth, isLoggedIn, onAuthChange } from "../../utils/auth";
 
 const STARTABLE = new Set(["available", "preparing", "finishing"]);
 
@@ -67,8 +67,8 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
   // Amíg az űrlap ezzel megegyezik, a pipa felesleges (és zavaró) — nincs mit menteni.
   const [savedProfile, setSavedProfile] = useState(null);
 
-  // Bejelentkezett fiók (Energiafelhő-fiók vagy e-mail-kód): { email, source }. Ilyenkor a
-  // backend a fiók e-mailjére köti a töltést (a body-beli e-mailt figyelmen kívül hagyja).
+  // Bejelentkezett Energiafelhő-fiók (Keycloak – ez az egyetlen belépési út): { email }.
+  // Ilyenkor a backend a fiók e-mailjére köti a töltést (a body-beli e-mailt figyelmen kívül hagyja).
   const [account, setAccount] = useState(null);
 
   const lines = useMemo(() => (cp ? placeLines(cp) : ["", ""]), [cp]);
@@ -108,7 +108,7 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
     if (profile.billing_tax_number) setBillingTaxNumber(profile.billing_tax_number);
   }, []);
 
-  // Ha be van lépve (korábbi belépés bármelyik módon), automatikusan előtöltjük az adatokat
+  // Ha be van lépve az Energiafelhő-fiókjával, automatikusan előtöltjük az adatokat
   // a /api/me-ből; 401-re az apiFetch kiüríti a lejárt tokent.
   useEffect(() => {
     let cancelled = false;
@@ -119,7 +119,7 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
         if (!res.ok) { if (!cancelled) setAccount(null); return; }
         const data = await res.json().catch(() => ({}));
         if (cancelled || !data?.email) return;
-        setAccount({ email: data.email, source: data.auth_source || authSource() });
+        setAccount({ email: data.email });
         setSavedProfile(profileIsComplete(data.profile) ? data.profile : null);
         applyProfile(data.profile || null, data.email);
       } catch { /* offline / hiba – néma */ }
@@ -418,14 +418,13 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
             Számlázási adatok
           </div>
 
-          {/* Belépés mentett adatokkal (Energiafelhő-fiók vagy e-mail-kód) – automatikus kitöltés */}
+          {/* Belépés Energiafelhő-fiókkal – a mentett számlázási adatok automatikus kitöltése */}
           <div className="mb-4">
             {account ? (
               <div className="rounded-xl border border-brand-green/40 bg-[#e6faf4] px-3 py-2.5 text-xs text-[#037a5c] flex items-center justify-between gap-2">
                 <span className="min-w-0 truncate">
                   ✓ Belépve: <span className="font-semibold">{account.email}</span>
-                  {account.source === "keycloak" ? " (Energiafelhő-fiók)" : ""}
-                  {" "}— a töltés ehhez a fiókhoz kerül.
+                  {" "}(Energiafelhő-fiók) — a töltés ehhez a fiókhoz kerül.
                 </span>
                 <button type="button" className="shrink-0 underline hover:no-underline" disabled={busy}
                   onClick={() => { clearAuth(); setAccount(null); }}>
@@ -433,15 +432,7 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
                 </button>
               </div>
             ) : (
-              <LoginAutofill
-                defaultEmail={email}
-                disabled={busy}
-                returnTo={`/?cp=${cp.id}`}
-                onLoggedIn={(profile, loginEmail) => {
-                  setAccount({ email: loginEmail, source: "email_token" });
-                  applyProfile(profile, loginEmail);
-                }}
-              />
+              <AccountLogin disabled={busy} returnTo={`/?cp=${cp.id}`} />
             )}
           </div>
 
@@ -623,7 +614,7 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
                 ) : (
                   <>
                     Számlázási adataim mentése a következő alkalomra. Legközelebb elég belépned az
-                    email-címeddel — a kártyaadataidat <span className="font-semibold text-ink">soha nem tároljuk</span>.
+                    Energiafelhő-fiókoddal — a kártyaadataidat <span className="font-semibold text-ink">soha nem tároljuk</span>.
                   </>
                 )}
               </span>
