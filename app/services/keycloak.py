@@ -262,7 +262,7 @@ async def verify_access_token(token: str) -> KeycloakIdentity:
 
     email = claims.get("email")
     email = email.strip().lower() if isinstance(email, str) and "@" in email else None
-    name = claims.get("name") or claims.get("preferred_username")
+    name = _display_name(claims)
 
     return KeycloakIdentity(
         sub=sub,
@@ -272,6 +272,26 @@ async def verify_access_token(token: str) -> KeycloakIdentity:
         azp=claims.get("azp") if isinstance(claims.get("azp"), str) else None,
         claims=claims,
     )
+
+
+def _display_name(claims: dict[str, Any]) -> str | None:
+    """Megjelenítendő név a tokenből — MAGYAR sorrendben.
+
+    Energiafelhő, 2026-09-22: a Keycloak `name` claimje mindig „Keresztnév Vezetéknév"
+    (a beépített full-name mapper angol sorrendet ad, realm-szinten nem állítható).
+    Ha megvan a `family_name` és a `given_name`, azokból rakjuk össze; a `name`, majd a
+    `preferred_username` csak tartalék. Ugyanez a szabály él a portálon
+    (customer-auth/name.ts) és az app.energiafelho.hu-n (Accounts.keycloak_nev).
+    """
+    family = claims.get("family_name")
+    given = claims.get("given_name")
+    if isinstance(family, str) and isinstance(given, str) and family.strip() and given.strip():
+        return f"{family.strip()} {given.strip()}"
+    for key in ("name", "preferred_username"):
+        v = claims.get(key)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return None
 
 
 # ---------------------------------------------------------------------------

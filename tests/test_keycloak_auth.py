@@ -188,6 +188,24 @@ async def _users():
 # ── JWT-ellenőrzés ──────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
+async def test_name_hungarian_order_from_family_and_given_name(client):
+    # Energiafelhő, 2026-09-22: a Keycloak name claimje „Keresztnév Vezetéknév";
+    # ha megvan a family_name + given_name, magyar sorrendben rakjuk össze.
+    tok = make_token(email="nev@example.hu", sub="sub-nev",
+                     extra={"name": "Gellért Székely", "given_name": "Gellért", "family_name": "Székely"})
+    r = await client.get("/api/me", headers=bearer(tok))
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "Székely Gellért"
+
+    # Hiányos névrész → a name marad (nem esik szét).
+    tok2 = make_token(email="nev2@example.hu", sub="sub-nev2",
+                      extra={"name": "Valaki Teszt", "given_name": "", "family_name": "Teszt"})
+    r2 = await client.get("/api/me", headers=bearer(tok2))
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["name"] == "Valaki Teszt"
+
+
+@pytest.mark.asyncio
 async def test_valid_keycloak_token_links_user(client):
     tok = make_token(email="Ugyfel@Example.hu", sub="sub-1")
     r = await client.get("/api/me", headers=bearer(tok))
