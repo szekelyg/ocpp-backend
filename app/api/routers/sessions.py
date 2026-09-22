@@ -375,7 +375,7 @@ async def _may_stop_session(
 
     Két bizonyíték fogadható el (bejelentkezés egyikhez sem kell):
       1) intent-token – a fizetéskor kiadott, aláírt token (success_url / e-mail link),
-      2) Bearer token – e-mail-kódos (v1) VAGY Keycloak access token –, ha a bejelentkezett
+      2) Bearer token – Keycloak access token (vagy egy még érvényes régi v1 e-mail-token) –, ha a bejelentkezett
          fiók e-mailje egyezik a session indítójával.
     Admin leállításra az /api/admin/sessions/{id}/stop való.
     """

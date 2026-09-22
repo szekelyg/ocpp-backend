@@ -1,46 +1,41 @@
 # app/api/routers/auth.py
 """
-Jelszó nélküli bejelentkezés email-kóddal (OTP), a mentett SZÁMLÁZÁSI profil
-lekéréséhez. Kártyaadatot sehol nem tárolunk és nem kérünk itt.
+Belépés az ev-n: egyetlen fiókos út van, az egységes Energiafelhő-fiók (Keycloak).
 
-Folyamat:
-  1) POST /auth/request-code {email}      → 6 jegyű kód emailben
-  2) POST /auth/verify-code {email, code} → { token, profile }
-  3) GET  /auth/profile   (Bearer token)  → { profile }   (autofill-hez)
+  GET /auth/keycloak/config  → a SPA ebből indítja az Authorization Code + PKCE folyamatot;
+                               a kapott access tokent Bearer-ként küldi (lásd docs/KEYCLOAK.md).
+  GET /auth/profile          → a mentett SZÁMLÁZÁSI profil (Bearer). Kártyaadatot sehol nem
+                               tárolunk és nem kérünk.
 
-Egységes Energiafelhő-fiók (Keycloak): a SPA a GET /auth/keycloak/config adataival indítja
-az Authorization Code + PKCE folyamatot; a kapott access tokent ugyanúgy Bearer-ként küldi,
-és az app.api.deps.get_current_identity mindkét tokenfajtát elfogadja (lásd docs/KEYCLOAK.md).
+A régi, saját e-mail-kódos belépés (POST /auth/request-code, POST /auth/verify-code)
+2026-09-22-én megszűnt (TERV-egy-fiok, C. fázis): a két végpont HTTP 410-et ad, kódot
+nem küldünk és nem ellenőrzünk. A korábban kiadott v1 e-mail-tokeneket a Bearer-t fogadó
+végpontok a lejáratukig (30 nap) még elfogadják – lásd app.api.deps. A vendég-töltés és a
+töltés utáni nyugta-link (v1i intent-token) ettől független, változatlan.
 """
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import desc, select
+from fastapi.responses import JSONResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
-from app.db.models import LoginCode, User
+from app.db.models import User
 from app.ocpp.time_utils import utcnow
-from app.services.auth_tokens import (
-    CODE_MAX_ATTEMPTS,
-    CODE_RESEND_COOLDOWN_S,
-    CODE_TTL_S,
-    generate_code,
-    hash_code,
-    issue_token,
-    verify_code_hash,
-    verify_token,
-)
-from app.services.email import send_login_code_email
+from app.services.auth_tokens import verify_token
 
 logger = logging.getLogger("auth")
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+RETIRED_LOGIN = {
+    "error": "retired",
+    "message": "A régi e-mail-kódos belépés megszűnt. Lépj be az Energiafelhő-fiókoddal.",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +87,7 @@ async def upsert_user_profile(db: AsyncSession, email: str, fields: dict) -> Use
 async def get_current_email(
     authorization: Optional[str] = Header(None),
 ) -> str:
-    """Bearer token → email. 401, ha hiányzik/érvénytelen/lejárt."""
+    """Bearer (v1 e-mail-token) → email. 401, ha hiányzik/érvénytelen/lejárt."""
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="missing_bearer_token")
     token = authorization.split(" ", 1)[1].strip()
@@ -103,94 +98,14 @@ async def get_current_email(
 
 
 # ---------------------------------------------------------------------------
-# Schemas
-# ---------------------------------------------------------------------------
-
-class RequestCodeIn(BaseModel):
-    email: EmailStr
-
-
-class VerifyCodeIn(BaseModel):
-    email: EmailStr
-    code: str = Field(..., min_length=4, max_length=8)
-
-
-# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
-@router.post("/request-code", response_model=dict)
-async def request_code(body: RequestCodeIn, db: AsyncSession = Depends(get_db)):
-    """Kód küldése. A válasz nem árulja el, létezik-e fiók (enumeráció-védelem)."""
-    email = _norm_email(str(body.email))
-    now = utcnow()
-
-    # Anti-spam: ha nemrég ment kód, ne küldjünk újat (de a válasz ok marad)
-    res = await db.execute(
-        select(LoginCode)
-        .where(LoginCode.email == email)
-        .order_by(desc(LoginCode.created_at))
-        .limit(1)
-    )
-    last = res.scalar_one_or_none()
-    if last and (now - last.created_at).total_seconds() < CODE_RESEND_COOLDOWN_S:
-        logger.info("request-code cooldown hit email=%s", email)
-        return {"ok": True, "cooldown_s": CODE_RESEND_COOLDOWN_S}
-
-    code = generate_code()
-    lc = LoginCode(
-        email=email,
-        code_hash=hash_code(email, code),
-        expires_at=now + timedelta(seconds=CODE_TTL_S),
-        attempts=0,
-    )
-    db.add(lc)
-    await db.commit()
-
-    sent = await send_login_code_email(to=email, code=code)
-    if not sent:
-        logger.warning("Login code email NOT sent (email service?) email=%s", email)
-    return {"ok": True, "ttl_s": CODE_TTL_S}
-
-
-@router.post("/verify-code", response_model=dict)
-async def verify_code(body: VerifyCodeIn, db: AsyncSession = Depends(get_db)):
-    email = _norm_email(str(body.email))
-    now = utcnow()
-
-    res = await db.execute(
-        select(LoginCode)
-        .where(
-            LoginCode.email == email,
-            LoginCode.consumed_at.is_(None),
-            LoginCode.expires_at > now,
-        )
-        .order_by(desc(LoginCode.created_at))
-        .limit(1)
-    )
-    lc = res.scalar_one_or_none()
-    if lc is None:
-        raise HTTPException(status_code=400, detail="code_invalid_or_expired")
-
-    if lc.attempts >= CODE_MAX_ATTEMPTS:
-        raise HTTPException(status_code=429, detail="too_many_attempts")
-
-    lc.attempts += 1
-
-    if not verify_code_hash(email, str(body.code), lc.code_hash):
-        await db.commit()  # próbálkozás számláló mentése
-        raise HTTPException(
-            status_code=400,
-            detail={"error": "code_incorrect", "attempts_left": max(0, CODE_MAX_ATTEMPTS - lc.attempts)},
-        )
-
-    # Siker: kód elhasználva, token kiadva, profil visszaadva
-    lc.consumed_at = now
-    user = await _load_user(db, email)
-    await db.commit()
-
-    token = issue_token(email)
-    return {"ok": True, "token": token, "profile": _profile_dict(user)}
+@router.post("/request-code", status_code=410, response_model=dict)
+@router.post("/verify-code", status_code=410, response_model=dict)
+async def retired_email_code_login():
+    """Megszűnt e-mail-kódos belépés: mindig 410, a body-t nem is olvassuk."""
+    return JSONResponse(status_code=410, content=RETIRED_LOGIN)
 
 
 @router.get("/keycloak/config", response_model=dict)

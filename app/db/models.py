@@ -396,11 +396,11 @@ class OcpiTariff(Base):
 
 
 class User(Base):
-    """Visszatérő felhasználó – jelszó NÉLKÜLI (email OTP / magic-code) fiók.
+    """Visszatérő felhasználó – jelszó NÉLKÜLI fiók, a kulcs az e-mail.
 
     Kizárólag a SZÁMLÁZÁSI profilt tároljuk, hogy legközelebb ne kelljen újra
     beírni. Kártyaadat SOHA nem kerül ide – az mindig a Stripe-nál marad.
-    Az emailhez kötött; a bejelentkezés email-kóddal történik (lásd LoginCode).
+    A belépés az egységes Energiafelhő-fiókkal (Keycloak) történik, lásd keycloak_sub.
     """
     __tablename__ = "users"
 
@@ -427,10 +427,10 @@ class User(Base):
 
 
 class LoginCode(Base):
-    """Egyszer használatos bejelentkezési kód (email OTP).
+    """A megszűnt (2026-09-22) e-mail-kódos belépés kódtáblája.
 
-    A nyers kódot SOHA nem tároljuk, csak a sózott hash-ét. Lejárat + próbálkozás-
-    korlát véd a brute-force ellen. Sikeres verifikáláskor consumed_at-et állítunk.
+    Már nem írjuk és nem olvassuk; a modell csak azért marad, hogy a séma és az Alembic
+    története egyben legyen. A tábla eldobása külön, additív-utáni migráció dolga.
     """
     __tablename__ = "login_codes"
 

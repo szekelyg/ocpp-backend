@@ -19,7 +19,9 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 # ---------------------------------------------------------------------------
-# Bejelentkezett fiók: e-mail-kódos HMAC-token (v1) VAGY Keycloak access token
+# Bejelentkezett fiók: Keycloak access token (az egyetlen belépési út), VAGY egy még le
+# nem járt, 2026-09-22 előtt kiadott v1 e-mail-token (a régi e-mail-kódos belépés megszűnt,
+# újat nem adunk ki; a meglévők 30 napon belül maguktól lejárnak – akkor ez az ág törölhető).
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -42,7 +44,7 @@ async def _identity_from_token(token: str, db: AsyncSession) -> Identity:
     from app.services import keycloak
     from app.services.auth_tokens import verify_token
 
-    # 1) saját e-mail-token (v1.<b64>.<exp>.<sig>) – a névtér érintetlen
+    # 1) régi e-mail-token (v1.<b64>.<exp>.<sig>) – csak a lejáratukig, újat nem adunk ki
     if not keycloak.looks_like_jwt(token):
         email = verify_token(token)
         if not email:

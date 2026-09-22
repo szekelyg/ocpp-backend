@@ -21,8 +21,8 @@ logger = logging.getLogger("intents")
 
 router = APIRouter(prefix="/intents", tags=["intents"])
 
-# Anti-spam a nyilvános, hitelesítés nélküli végponton – ugyanaz a DB-alapú minta,
-# mint az /auth/request-code cooldownja: egy e-mail-címről az intent élettartamán
+# Anti-spam a nyilvános, hitelesítés nélküli végponton – egyszerű DB-alapú számlálás
+# (ilyen volt a megszűnt /auth/request-code cooldownja is): egy e-mail-címről az intent élettartamán
 # (15 perc) belül legfeljebb ennyi fizetési kísérlet indítható. Egy tisztességes
 # felhasználónak ez bőven elég (a Stripe-oldalról visszalépve is új intent jön létre).
 INTENT_RATE_WINDOW_S = 15 * 60

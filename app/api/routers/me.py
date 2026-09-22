@@ -1,7 +1,7 @@
 # app/api/routers/me.py
 """
-A bejelentkezett fiók saját adatai – e-mail-kódos tokennel VAGY Keycloak access tokennel
-(app.api.deps.get_current_identity). Ezt hívja az ev SPA "Töltéseim" oldala és a portál
+A bejelentkezett fiók saját adatai – Keycloak access tokennel (vagy egy még le nem járt
+régi v1 e-mail-tokennel; app.api.deps.get_current_identity). Ezt hívja az ev SPA "Töltéseim" oldala és a portál
 (my.energiafelho.hu) is; a szerződést a docs/KEYCLOAK.md rögzíti.
 
   GET /api/me                        → profil (e-mail, név, mentett számlázási adatok, keycloak_linked)

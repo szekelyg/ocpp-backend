@@ -1,9 +1,11 @@
 # app/services/auth_tokens.py
 """
-Jelszó nélküli bejelentkezés segédfüggvényei – külső könyvtár nélkül.
+Saját, aláírt tokenek – külső könyvtár nélkül.
 
-- Bejelentkezési kód (OTP): 6 jegyű, sózott SHA-256 hash-t tárolunk (a nyerset soha).
-- Session token: HMAC-SHA256-tal aláírt, állapotmentes token ("v1.<b64url(email)>.<exp>.<sig>").
+- E-mail-token (v1): HMAC-SHA256-tal aláírt, állapotmentes token
+  ("v1.<b64url(email)>.<exp>.<sig>"). Kiadni már nem adjuk ki ügyfélnek – a régi e-mail-kódos
+  belépés 2026-09-22-én megszűnt –, de a korábban kiadottakat a lejáratukig elfogadjuk.
+- Intent-token (v1i): a vendég-töltés nyugta-/leállítási linkjének bizonyítéka (változatlan).
 
 A titok forrása AUTH_SECRET; ha nincs beállítva, a már meglévő STRIPE_WEBHOOK_SECRET-re
 esik vissza, hogy külön konfiguráció nélkül is deploy-olható legyen.
@@ -14,16 +16,10 @@ import base64
 import hashlib
 import hmac
 import os
-import secrets
 import time
 from typing import Optional
 
-# Kód: 6 számjegy, 10 perc érvényesség, max 5 próbálkozás
-CODE_TTL_S = 10 * 60
-CODE_MAX_ATTEMPTS = 5
-# Új kód kérése között minimum ennyi teljen el (anti-spam)
-CODE_RESEND_COOLDOWN_S = 45
-# Session token élettartama: 30 nap
+# E-mail-token élettartama: 30 nap (a 2026-09-22 előtt kiadottak eddig élnek)
 TOKEN_TTL_S = 30 * 24 * 60 * 60
 
 
@@ -35,26 +31,7 @@ def _secret() -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# OTP kód
-# ---------------------------------------------------------------------------
-
-def generate_code() -> str:
-    """Kriptográfiailag biztonságos 6 jegyű kód (vezető nullákkal)."""
-    return f"{secrets.randbelow(1_000_000):06d}"
-
-
-def hash_code(email: str, code: str) -> str:
-    """Email-hez sózott SHA-256 hex – így ugyanaz a kód más emailhez más hash."""
-    msg = f"{email.strip().lower()}:{code.strip()}".encode("utf-8")
-    return hmac.new(_secret(), msg, hashlib.sha256).hexdigest()
-
-
-def verify_code_hash(email: str, code: str, stored_hash: str) -> bool:
-    return hmac.compare_digest(hash_code(email, code), stored_hash)
-
-
-# ---------------------------------------------------------------------------
-# Session token (állapotmentes, aláírt)
+# E-mail-token (állapotmentes, aláírt)
 # ---------------------------------------------------------------------------
 
 def _b64u(b: bytes) -> str:
