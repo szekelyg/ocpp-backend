@@ -227,6 +227,20 @@ async def test_portal_token_accepted_via_azp_without_aud(client):
 
 
 @pytest.mark.asyncio
+async def test_own_spa_client_token_accepted_without_audience_mapper(client, monkeypatch):
+    """Az `ev` kliens tokenjében a Keycloak alapból csak `account` aud van; azp=ev elég."""
+    monkeypatch.setenv("KEYCLOAK_ALLOWED_AZP", "")
+    r = await client.get("/api/me", headers=bearer(make_token(aud="account", azp="ev")))
+    assert r.status_code == 200, r.text
+    # aud-listában az ev (audience-mapperrel) szintén jó
+    r = await client.get("/api/me", headers=bearer(make_token(aud=["account", "ev"], azp="portal")))
+    assert r.status_code == 200
+    # de a portál azp-je engedélyezés nélkül nem
+    r = await client.get("/api/me", headers=bearer(make_token(aud="account", azp="portal")))
+    assert r.status_code == 401 and r.json()["detail"] == "keycloak_invalid_audience"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("kwargs, reason", [
     (dict(exp_in=-120), "token_expired"),
     (dict(iss="https://id.test/realms/masik"), "invalid_issuer"),

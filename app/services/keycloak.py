@@ -10,7 +10,7 @@ Env:
   KEYCLOAK_ISSUER       pl. https://id.energiafelho.hu/realms/ugyfelek  (kötelező a bekapcsoláshoz)
   KEYCLOAK_AUDIENCE     az `aud`-ban elvárt kliens, alap: ev
   KEYCLOAK_ALLOWED_AZP  vesszővel elválasztott kliens-lista, amelyek tokenje `aud` nélkül is jó
-                        (azp = a tokent kérő kliens), pl. "portal"
+                        (azp = a tokent kérő kliens), pl. "portal"; a saját `ev` kliens mindig jó
   KEYCLOAK_JWKS_URL     opcionális; alap: {issuer}/protocol/openid-connect/certs
   KEYCLOAK_JWKS_TTL_S   JWKS cache élettartam (alap 3600)
 
@@ -192,8 +192,11 @@ def _aud_ok(claims: dict) -> bool:
         aud_set = set()
     if audience() in aud_set:
         return True
+    # azp = a tokent kérő kliens. A saját SPA-kliensünk (`ev`) tokenje akkor is jó, ha nincs
+    # audience-mapper (a Keycloak alapból csak `account`-ot tesz az aud-ba); más kliens
+    # (pl. a portál) csak a KEYCLOAK_ALLOWED_AZP listából.
     azp = claims.get("azp")
-    return isinstance(azp, str) and azp in allowed_azp()
+    return isinstance(azp, str) and (azp == audience() or azp in allowed_azp())
 
 
 async def verify_access_token(token: str) -> KeycloakIdentity:

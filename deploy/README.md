@@ -35,6 +35,14 @@ git commit ...            # a szerver a GitHub master-t húzza
 így az új migrációk maguktól felmennek. Egy újraindítás ~10 mp, a töltők visszakapcsolódnak;
 ha lehet, ne aktív töltés közben (`select * from charge_sessions where finished_at is null`).
 
+### Keycloak (egységes Energiafelhő-fiók)
+
+A backend a `KEYCLOAK_*` env-ekkel (lásd `.env.example`, részletek: `docs/KEYCLOAK.md`) fogadja az
+`id.energiafelho.hu` tokenjeit; enélkül a funkció ki van kapcsolva, minden más megy tovább. A
+`deploy.sh` változatlan: a build felrakja a `PyJWT[crypto]`-t, az `entrypoint.sh` migrációja
+(`e5c1a7b3d9f2`, `users.keycloak_sub`) additív. Dev stackhez a `.env.dev`-be ugyanezek a sorok
+kerülnek, plusz a Keycloak `ev` kliensén `http://localhost:5173/auth/keycloak/callback` redirect URI.
+
 ## Éles szerver kézzel
 
 ```bash
