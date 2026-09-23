@@ -386,6 +386,9 @@ function ChargerConfigModal({ cp, busy, onClose, onSave }) {
     longitude: cp.longitude ?? "",
     connector_type: cp.connector_type || "",
     max_power_kw: cp.max_power_kw ?? "",
+    load_group: cp.load_group || "",
+    load_group_max_a: cp.load_group_max_a ?? "",
+    max_current_a: cp.max_current_a ?? "",
   });
 
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
@@ -423,6 +426,9 @@ function ChargerConfigModal({ cp, busy, onClose, onSave }) {
       longitude: num(form.longitude),
       connector_type: form.connector_type,
       max_power_kw: num(form.max_power_kw),
+      load_group: form.load_group.trim(),
+      load_group_max_a: num(form.load_group_max_a),
+      max_current_a: num(form.max_current_a),
     };
   }
 
@@ -548,6 +554,37 @@ function ChargerConfigModal({ cp, busy, onClose, onSave }) {
           <div className="text-xs text-ink-muted -mt-2">
             Ebből számol az OCPI AC/DC-t és amperszámot a roaming partnereknek – ha üresen marad,
             a rendszer 22 kW-os Type 2-nek hirdetné meg.
+          </div>
+
+          <div className="border-t border-brand-line pt-4">
+            <div className="text-sm font-semibold text-ink mb-1">Terheléselosztás (közös betáplálás)</div>
+            <div className="text-xs text-ink-muted mb-3">
+              Azonos nevű csoport töltői osztoznak a csoport áramán. Ha egy tölt, a teljes áramot kapja;
+              ha több, egyenlően osztjuk (pl. 32 A → 16–16 A). A töltő a saját <code>CurrentDynamic</code>
+              korlátját kapja meg élőben. Üres csoportnév = nincs elosztás.
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Csoport neve">
+                <input className={INPUT_CLS} value={form.load_group} onChange={set("load_group")}
+                       list="load-group-names" placeholder="pl. nograd_var" />
+              </Field>
+              <Field label="Csoport árama (A/fázis)">
+                <input className={INPUT_CLS} value={form.load_group_max_a} onChange={set("load_group_max_a")}
+                       inputMode="numeric" placeholder="32" />
+              </Field>
+              <Field label="Töltő max (A)">
+                <input className={INPUT_CLS} value={form.max_current_a} onChange={set("max_current_a")}
+                       inputMode="numeric" placeholder="32" />
+              </Field>
+            </div>
+            {cp.load_balance && (
+              <div className="text-xs text-ink-muted mt-2">
+                Most kiosztva: <span className="font-mono">{cp.load_balance.applied_a ?? "—"} A</span>
+                {cp.load_balance.target_a != null && cp.load_balance.target_a !== cp.load_balance.applied_a && (
+                  <> (cél {cp.load_balance.target_a} A{cp.load_balance.last_error ? `, hiba: ${cp.load_balance.last_error}` : ""})</>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -731,7 +768,15 @@ function ChargersTab({ chargers, apiFetch, toast, onRefresh }) {
           )}
         </Td>
         <Td>{cp.connector_type || <span className="text-brand-amber">—</span>}</Td>
-        <Td>{cp.max_power_kw ? `${cp.max_power_kw} kW` : <span className="text-brand-amber">—</span>}</Td>
+        <Td>
+          {cp.max_power_kw ? `${cp.max_power_kw} kW` : <span className="text-brand-amber">—</span>}
+          {cp.load_group && (
+            <div className="text-xs text-ink-muted whitespace-nowrap" title="Terheléselosztás: csoport · kiosztott / max amper">
+              ⚖ {cp.load_group} · {cp.load_balance?.applied_a ?? "?"}/{cp.max_current_a ?? 32} A
+              {cp.load_balance?.last_error && <span className="text-rose-600"> !</span>}
+            </div>
+          )}
+        </Td>
         <Td>{[cp.vendor, cp.model].filter(Boolean).join(" ") || "—"}</Td>
         <Td className="font-mono text-xs">{cp.firmware_version || "—"}</Td>
         <Td className="font-mono text-xs">{cp.serial_number || "—"}</Td>
@@ -850,6 +895,10 @@ function ChargersTab({ chargers, apiFetch, toast, onRefresh }) {
           onSave={(patch, opts) => saveConfig(editCp, patch, opts)}
         />
       )}
+      {/* a terheléselosztás csoportnevei a beállító űrlap mezőjéhez */}
+      <datalist id="load-group-names">
+        {[...new Set(chargers.map(c => c.load_group).filter(Boolean))].map(g => <option key={g} value={g} />)}
+      </datalist>
 
       {/* GetConfig modal */}
       {configOpen && (

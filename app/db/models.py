@@ -74,6 +74,13 @@ class ChargePoint(Base):
     connector_type = Column(String(64), nullable=True)   # pl. "Type 2", "CCS2", "CHAdeMO"
     max_power_kw = Column(Float, nullable=True)           # pl. 22.0, 50.0
 
+    # Terheléselosztás közös betáplálású töltők között (app/services/load_balance.py):
+    # azonos load_group-ú töltők osztoznak load_group_max_a-n (fázisonkénti amper; a tagok
+    # közül a legkisebb nem-üres érték érvényes); max_current_a a töltő saját maximuma (alap 32).
+    load_group = Column(String(64), nullable=True, index=True)
+    load_group_max_a = Column(Integer, nullable=True)
+    max_current_a = Column(Integer, nullable=True)
+
     status = Column(String(32), nullable=False, default="available")
     last_seen_at = Column(DateTime(timezone=True), nullable=True)
 

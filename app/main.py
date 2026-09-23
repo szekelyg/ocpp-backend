@@ -265,11 +265,22 @@ async def _invoice_retry_loop() -> None:
             logger.exception("InvoiceRetry task error")
 
 
+async def _load_balance_loop() -> None:
+    """Terheléselosztás ellenőrző kör: percenként újraszámol, és csak eltérésnél küld
+    (elveszett StartTransaction/StopTransaction, újraindult töltő, admin-módosítás)."""
+    from app.services.load_balance import rebalance_all
+    await asyncio.sleep(10)
+    while True:
+        await rebalance_all("periodic")
+        await asyncio.sleep(60)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     tasks = [
         asyncio.create_task(_waiting_timeout_loop()),
         asyncio.create_task(_invoice_retry_loop()),
+        asyncio.create_task(_load_balance_loop()),
     ]
     yield
     for task in tasks:

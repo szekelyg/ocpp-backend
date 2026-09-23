@@ -76,7 +76,9 @@ async def list_charge_points(db: AsyncSession = Depends(get_db)):
         .where(ChargePoint.is_published.is_(True))
     )
     items = result.scalars().all()
-    return [_cp_dict(cp) for cp in items]
+    from app.services.load_balance import public_sharing_info
+    sharing = await public_sharing_info(items)
+    return [{**_cp_dict(cp), "load_sharing": sharing.get(cp.id)} for cp in items]
 
 
 @router.get("/{cp_id}", response_model=dict)
@@ -91,4 +93,6 @@ async def get_charge_point(cp_id: int, db: AsyncSession = Depends(get_db)):
     if not cp:
         raise HTTPException(status_code=404, detail="ChargePoint not found")
 
-    return _cp_dict(cp)
+    from app.services.load_balance import public_sharing_info
+    sharing = await public_sharing_info([cp])
+    return {**_cp_dict(cp), "load_sharing": sharing.get(cp.id)}

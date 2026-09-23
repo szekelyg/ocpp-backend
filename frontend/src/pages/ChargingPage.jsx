@@ -286,6 +286,13 @@ export default function ChargingPage() {
                   ? `${(session.power_w / 1000).toFixed(1)} kW`
                   : "—"}
               </div>
+              {session?.power_limit?.shared_now && session.power_limit.limit_kw < session.power_limit.cap_kw && (
+                <div className="mt-1.5 text-xs text-ink-soft leading-snug">
+                  Most legfeljebb <span className="font-semibold text-ink">{session.power_limit.limit_kw} kW</span>:
+                  a szomszédos töltő is használatban van (közös betáplálás). Amint az befejezi,
+                  a teljesítmény magától {session.power_limit.cap_kw} kW-ra áll.
+                </div>
+              )}
               {session?.phases?.list?.length > 0 && (
                 <div className="mt-2">
                   <div className="text-xs text-ink-muted mb-1.5">

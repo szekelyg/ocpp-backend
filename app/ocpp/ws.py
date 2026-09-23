@@ -23,6 +23,7 @@ from app.ocpp.handlers.status import save_status_notification
 from app.ocpp.handlers.transactions import start_transaction, stop_transaction
 from app.ocpp.handlers.meter import save_meter_values
 from app.ocpp.handlers.reconnect import retry_pending_remote_start
+from app.services.load_balance import rebalance_for_cp
 
 logger = logging.getLogger("ocpp")
 
@@ -117,6 +118,8 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
                 asyncio.create_task(_set_meter_interval(cp_id, 15))
                 # Egyedi megjelenítési szöveg beállítása (ha van OCPP_DISPLAY_TEXT env)
                 asyncio.create_task(_set_display_text(cp_id))
+                # Terheléselosztás: boot után az áramkorlát újra kiosztva (a töltő oldalán elveszhetett)
+                asyncio.create_task(rebalance_for_cp(cp_id, "boot"))
 
             elif action == "Authorize":
                 id_tag = payload.get("idTag", "")
@@ -143,11 +146,13 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
                 tx_id = await start_transaction(cp_id, payload)
                 response = [3, unique_id, {"transactionId": int(tx_id or 0), "idTagInfo": {"status": "Accepted"}}]
                 await ws.send_text(json.dumps(response))
+                asyncio.create_task(rebalance_for_cp(cp_id, "start"))
 
             elif action == "StopTransaction":
                 await stop_transaction(cp_id, payload)
                 response = [3, unique_id, {"idTagInfo": {"status": "Accepted"}}]
                 await ws.send_text(json.dumps(response))
+                asyncio.create_task(rebalance_for_cp(cp_id, "stop"))
 
             elif action == "MeterValues":
                 await save_meter_values(cp_id, payload)

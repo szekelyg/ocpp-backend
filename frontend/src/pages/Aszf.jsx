@@ -177,6 +177,15 @@ export default function Aszf() {
             fizetett Szolgáltatás ellenértékét az Ügyfél köteles utólag, a Szolgáltató e-mailben
             megküldött felhívása alapján rendezni.
           </Sub>
+          <Sub n="6.9">
+            Egyes Töltőállomásokon több töltő közös hálózati betáplálásról működik. Ilyen
+            állomáson egyidejű használat esetén a rendelkezésre álló teljesítmény a töltők között
+            automatikusan megoszlik, így a töltés teljesítménye átmenetileg alacsonyabb lehet a
+            töltőn feltüntetett névleges értéknél; a szabad kapacitás felszabadulásakor a
+            teljesítmény magától visszaáll. Erről a Weboldal a töltés indítása előtt és a töltés
+            alatt is tájékoztat. A Díj ettől nem függ: kizárólag a ténylegesen felhasznált
+            energia (kWh) után fizetendő.
+          </Sub>
         </Section>
 
         <Section n="7" title="Elállás, visszatérítés, fogyasztói tájékoztatás">

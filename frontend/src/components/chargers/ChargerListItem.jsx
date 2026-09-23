@@ -30,6 +30,11 @@ export default function ChargerListItem({ cp, selected, onClick }) {
               max. {cp.max_power_kw} kW
             </span>
           )}
+          {cp.load_sharing && (
+            <span className="chip" title="Közös betáplálás: egyidejű töltésnél a teljesítmény megoszlik">
+              közös betáplálás · együtt {cp.load_sharing.shared_kw} kW
+            </span>
+          )}
         </div>
       )}
 

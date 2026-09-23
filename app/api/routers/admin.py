@@ -217,6 +217,11 @@ def _cp_missing_fields(cp: ChargePoint) -> list[str]:
     return missing
 
 
+def _lb_snapshot() -> dict:
+    from app.services.load_balance import snapshot
+    return snapshot()
+
+
 def _cp_dict_admin(cp: ChargePoint) -> dict:
     missing = _cp_missing_fields(cp)
     return {
@@ -232,6 +237,10 @@ def _cp_dict_admin(cp: ChargePoint) -> dict:
         "serial_number": cp.serial_number,
         "connector_type": cp.connector_type,
         "max_power_kw": cp.max_power_kw,
+        "load_group": cp.load_group,
+        "load_group_max_a": cp.load_group_max_a,
+        "max_current_a": cp.max_current_a,
+        "load_balance": _lb_snapshot().get(cp.ocpp_id),
         "status": compute_status(cp),
         "raw_status": cp.status,
         "last_seen_at": cp.last_seen_at.isoformat() if cp.last_seen_at else None,
@@ -328,6 +337,55 @@ async def admin_stats(
     }
 
 
+# ── Terheléselosztás ──────────────────────────────────────────────────────────
+
+@router.get("/load-groups")
+async def admin_load_groups(
+    live: bool = Query(False, description="GetConfiguration-nel visszaolvassa a töltőből a CurrentDynamic/CurrentOffered értékét"),
+    db: AsyncSession = Depends(get_db),
+    _: AdminPrincipal = Depends(verify_admin),
+):
+    """Csoportok és tagjaik a legutóbbi kiosztással (target/applied amper). `live=1`: a töltőből
+    visszaolvasva is (`live`: {CurrentDynamic, CurrentOffered, CurrentLimitUser…})."""
+    from app.services.load_balance import DEFAULT_MAX_A, config_key
+    from app.ocpp.registry import get_ws, send_call_and_wait
+    res = await db.execute(
+        select(ChargePoint).where(ChargePoint.load_group.isnot(None)).order_by(ChargePoint.load_group, ChargePoint.id)
+    )
+    snap = _lb_snapshot()
+    groups: dict[str, dict] = {}
+    for cp in res.scalars().all():
+        g = groups.setdefault(cp.load_group, {"name": cp.load_group, "max_a": None, "members": []})
+        if cp.load_group_max_a and (g["max_a"] is None or cp.load_group_max_a < g["max_a"]):
+            g["max_a"] = cp.load_group_max_a
+        member = {
+            "id": cp.id, "ocpp_id": cp.ocpp_id, "cap_a": cp.max_current_a or DEFAULT_MAX_A,
+            "status": compute_status(cp), **(snap.get(cp.ocpp_id) or {}),
+        }
+        if live and (await get_ws(cp.ocpp_id)) is not None:
+            keys = sorted({config_key(), "CurrentDynamic", "CurrentOffered", "CurrentLimitUser", "CurrentLimitDefault", "CurrentLimitHardware"})
+            try:
+                res = await send_call_and_wait(cp.ocpp_id, "GetConfiguration", {"key": keys}, timeout_s=10)
+                member["live"] = {k.get("key"): k.get("value") for k in (res or {}).get("configurationKey", [])}
+            except Exception as e:
+                member["live"] = {"error": str(e)}
+        g["members"].append(member)
+    return list(groups.values())
+
+
+@router.post("/load-groups/{group}/rebalance")
+async def admin_load_group_rebalance(
+    group: str,
+    _: AdminPrincipal = Depends(verify_admin),
+):
+    """Kézi újraosztás (pl. ellenőrzéshez). Visszaadja a cél-ampereket."""
+    from app.services.load_balance import rebalance_group
+    targets = await rebalance_group(group, reason="admin")
+    if not targets:
+        raise HTTPException(status_code=404, detail="load_group_not_found_or_no_limit")
+    return {"ok": True, "targets": targets, "state": {k: v for k, v in _lb_snapshot().items() if k in targets}}
+
+
 # ── Charge points ─────────────────────────────────────────────────────────────
 
 @router.get("/charge-points")
@@ -350,6 +408,11 @@ class ChargePointConfigIn(BaseModel):
     connector_type: Optional[str] = None
     max_power_kw: Optional[float] = None
     is_published: Optional[bool] = None
+    # Terheléselosztás (app/services/load_balance.py): csoport neve, a csoport összes árama
+    # fázisonként (A), a töltő saját maximuma (A). Üres csoportnév = nincs elosztás.
+    load_group: Optional[str] = None
+    load_group_max_a: Optional[int] = None
+    max_current_a: Optional[int] = None
 
 
 _LOCATION_FIELDS = ("location_name", "address_text", "latitude", "longitude")
@@ -426,6 +489,26 @@ async def admin_configure_charge_point(
     if "max_power_kw" in data:
         cp.max_power_kw = data["max_power_kw"]
 
+    load_changed = False
+    if "load_group" in data:
+        g = (data["load_group"] or "").strip()
+        if len(g) > 64:
+            raise HTTPException(status_code=422, detail={"error": "load_group_too_long"})
+        cp.load_group = g or None
+        load_changed = True
+    if "load_group_max_a" in data:
+        v = data["load_group_max_a"]
+        if v is not None and not (6 <= int(v) <= 1000):
+            raise HTTPException(status_code=422, detail={"error": "load_group_max_a_out_of_range"})
+        cp.load_group_max_a = int(v) if v is not None else None
+        load_changed = True
+    if "max_current_a" in data:
+        v = data["max_current_a"]
+        if v is not None and not (6 <= int(v) <= 1000):
+            raise HTTPException(status_code=422, detail={"error": "max_current_a_out_of_range"})
+        cp.max_current_a = int(v) if v is not None else None
+        load_changed = True
+
     # A publikálási döntés előtt a fenti módosításokat látnia kell az ellenőrzésnek.
     await db.flush()
     await db.refresh(cp, attribute_names=["location"])
@@ -454,6 +537,11 @@ async def admin_configure_charge_point(
         "admin_configure_charge_point cp_id=%s ocpp_id=%s published=%s fields=%s",
         cp.id, cp.ocpp_id, cp.is_published, sorted(data.keys()),
     )
+    if load_changed:
+        # minden csoport újraosztva (a töltő ki is kerülhetett egy csoportból)
+        import asyncio
+        from app.services.load_balance import rebalance_all
+        asyncio.create_task(rebalance_all("admin-config"))
     return _cp_dict_admin(cp)
 
 

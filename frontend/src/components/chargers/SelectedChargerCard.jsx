@@ -279,6 +279,9 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
         </div>
       )}
 
+      {/* Közös betáplálás (terheléselosztás): a szomszédos töltővel osztozik az áramon. */}
+      {cp.load_sharing && <LoadSharingHint ls={cp.load_sharing} />}
+
       {/* Állapot tájékoztató */}
       {statusStr === "available" && (
         <div className="rounded-xl bg-brand-panel p-3 text-xs text-ink-soft">
@@ -358,7 +361,8 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
 
         {/* Teljesítmény a fizetés ELŐTT – korlátozott állomásnál ez a legfontosabb
             információ, amit a vezető a töltő címkéjéről nem tud meg. */}
-        {cp.max_power_kw > 0 && (
+        {cp.load_sharing && <LoadSharingHint ls={cp.load_sharing} className="mt-3" />}
+        {cp.max_power_kw > 0 && !cp.load_sharing && (
           isPowerLimited(cp) ? (
             <div className="mt-3 hint">
               Ez az állomás <span className="font-bold">{cp.max_power_kw} kW</span>-ra van
@@ -642,6 +646,34 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
           </button>
         </div>
       </PayModal>
+    </div>
+  );
+}
+
+/**
+ * Közös betáplálás: több töltő osztozik egy hálózati csatlakozáson. A vezető a töltő
+ * címkéje alapján 22 kW-ra számítana, ezért fizetés előtt is elmondjuk, hogy ha a
+ * szomszédos töltő is használatban van, a teljesítmény megoszlik. A díj nem függ ettől.
+ */
+function LoadSharingHint({ ls, className = "" }) {
+  const others = Math.max(1, (ls.members || 2) - 1);
+  const busyNow = ls.shared_now && ls.current_limit_kw != null && ls.current_limit_kw < ls.group_max_kw;
+  return (
+    <div className={`hint ${className}`}>
+      {busyNow ? (
+        <>
+          A szomszédos töltő most használatban van, ezért itt a töltés{" "}
+          <span className="font-bold">legfeljebb {ls.current_limit_kw} kW</span>-tal indul;
+          amint a másik töltés véget ér, magától {ls.group_max_kw} kW-ra áll.
+        </>
+      ) : (
+        <>
+          Ez az állomás közös betáplálásról működik {others === 1 ? "a szomszédos töltővel" : `${others} másik töltővel`}:
+          egyedül <span className="font-bold">{ls.group_max_kw} kW</span>, egyidejű töltésnél
+          töltőnként <span className="font-bold">{ls.shared_kw} kW</span>. Az átállás automatikus.
+        </>
+      )}{" "}
+      A díj ettől nem változik: csak a felhasznált energiát fizeti.
     </div>
   );
 }

@@ -364,7 +364,13 @@ async def get_session(
     power_w = await _get_latest_power_w(db, s.id) if s.finished_at is None else None
     phases = await _get_latest_phases(db, s.id) if s.finished_at is None else None
     hold = s.intent.hold_amount_huf if s.intent else None
-    return _session_to_dict(s, s.charge_point, power_w=power_w, hold_amount_huf=hold, phases=phases)
+    out = _session_to_dict(s, s.charge_point, power_w=power_w, hold_amount_huf=hold, phases=phases)
+    # Terheléselosztás (közös betáplálás): a mostani felső korlát, hogy a vezető lássa,
+    # miért tölt lassabban, ha a szomszédos töltő is használatban van.
+    if s.finished_at is None and s.charge_point is not None and getattr(s.charge_point, "load_group", None):
+        from app.services.load_balance import limit_info
+        out["power_limit"] = limit_info(s.charge_point.ocpp_id)
+    return out
 
 
 async def _may_stop_session(
