@@ -1,12 +1,13 @@
 # app/api/routers/admin.py
+import base64
 import logging
 import os
 import secrets
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,37 +21,97 @@ from app.services.auth_tokens import issue_intent_token
 logger = logging.getLogger("admin")
 
 router = APIRouter(prefix="/admin", tags=["admin"])
-_security = HTTPBasic()
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
+#
+# Admin-hozzáférés két úton (2026-09-23-tól, „egy fiók" terv):
+#   1. Energiafelhő-fiók (Keycloak) Bearer access tokennel, amelyben a realm-szerepek között
+#      ott van a KEYCLOAK_ADMIN_ROLE (alap: `ev-admin`). A szerepet a Keycloak admin adja
+#      (platform-repó: keycloak/scripts/apply-ev-admin-role.sh). Ez az elsődleges út.
+#   2. HTTP Basic (ADMIN_USERNAME / ADMIN_PASSWORD env) – vész-út, csak amíg az
+#      ADMIN_PASSWORD be van állítva; az env-ből törölve ez az út megszűnik.
+# Fail-closed: ha egyik sincs beállítva → 503 admin_not_configured.
+
+ADMIN_ROLE_DEFAULT = "ev-admin"
+
+
+def admin_role() -> str:
+    return (os.environ.get("KEYCLOAK_ADMIN_ROLE") or ADMIN_ROLE_DEFAULT).strip() or ADMIN_ROLE_DEFAULT
+
+
+@dataclass(frozen=True)
+class AdminPrincipal:
+    kind: Literal["keycloak", "basic"]
+    label: str                       # naplózáshoz: e-mail (Keycloak) vagy felhasználónév (Basic)
+
 
 def _admin_creds():
-    # Nincs beégetett jelszó default: ADMIN_PASSWORD kötelező env változó.
+    # Nincs beégetett jelszó default: ADMIN_PASSWORD nélkül a Basic-út zárva.
     return (
         os.environ.get("ADMIN_USERNAME", "admin"),
         os.environ.get("ADMIN_PASSWORD"),
     )
 
 
-def verify_admin(credentials: HTTPBasicCredentials = Depends(_security)):
+def _unauthorized(detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=detail,
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+async def _admin_from_keycloak(token: str) -> AdminPrincipal:
+    from app.services import keycloak
+
+    if not keycloak.enabled():
+        raise _unauthorized("keycloak_disabled")
+    try:
+        ident = await keycloak.verify_access_token(token)
+    except keycloak.KeycloakAuthError as e:
+        logger.info("admin: keycloak token elutasítva: %s", e.reason)
+        raise _unauthorized(f"keycloak_{e.reason}")
+    role = admin_role()
+    if role not in ident.realm_roles:
+        logger.warning("admin: nincs '%s' szerep (sub=%s email=%s)", role, ident.sub, ident.email)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin_role_missing")
+    return AdminPrincipal(kind="keycloak", label=ident.email or ident.sub)
+
+
+def _admin_from_basic(b64: str) -> AdminPrincipal:
     exp_user, exp_pass = _admin_creds()
     if not exp_pass:
-        # Fail-closed: ADMIN_PASSWORD nélkül nincs admin hozzáférés (nincs publikus default jelszó).
-        logger.error("ADMIN_PASSWORD nincs beállítva – admin hozzáférés letiltva (503)")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="admin_not_configured",
-        )
-    ok = secrets.compare_digest(credentials.username.encode(), exp_user.encode()) and \
-         secrets.compare_digest(credentials.password.encode(), exp_pass.encode())
+        raise _unauthorized("basic_disabled")
+    try:
+        raw = base64.b64decode(b64.strip(), validate=True).decode("utf-8")
+        username, _, password = raw.partition(":")
+    except Exception:
+        raise _unauthorized("malformed_basic")
+    ok = secrets.compare_digest(username.encode(), exp_user.encode()) and \
+         secrets.compare_digest(password.encode(), exp_pass.encode())
     if not ok:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Unauthorized",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    return credentials
+        raise _unauthorized("Unauthorized")
+    return AdminPrincipal(kind="basic", label=username)
+
+
+async def verify_admin(authorization: Optional[str] = Header(None)) -> AdminPrincipal:
+    """Admin-jog: Keycloak Bearer `ev-admin` szereppel VAGY (vész-út) Basic. Lásd fent."""
+    from app.services import keycloak
+
+    _, exp_pass = _admin_creds()
+    if not keycloak.enabled() and not exp_pass:
+        logger.error("sem KEYCLOAK_ISSUER, sem ADMIN_PASSWORD nincs beállítva – admin hozzáférés letiltva (503)")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="admin_not_configured")
+    if not authorization:
+        raise _unauthorized("missing_authorization")
+    scheme, _, value = authorization.strip().partition(" ")
+    value = value.strip()
+    if scheme.lower() == "bearer" and value:
+        return await _admin_from_keycloak(value)
+    if scheme.lower() == "basic" and value:
+        return _admin_from_basic(value)
+    raise _unauthorized("unsupported_auth_scheme")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -202,7 +263,7 @@ async def _load_session(db: AsyncSession, session_id: int) -> ChargeSession:
 @router.get("/stats")
 async def admin_stats(
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
 ):
     today_start = _utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -272,7 +333,7 @@ async def admin_stats(
 @router.get("/charge-points")
 async def admin_list_charge_points(
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
 ):
     res = await db.execute(
         select(ChargePoint).options(selectinload(ChargePoint.location))
@@ -327,7 +388,7 @@ async def admin_configure_charge_point(
     cp_id: int,
     body: ChargePointConfigIn,
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
 ):
     """Töltő beállítása és publikálása.
 
@@ -400,7 +461,7 @@ async def admin_configure_charge_point(
 async def admin_delete_charge_point(
     cp_id: int,
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
 ):
     """Téves töltő-sor törlése (pl. elgépelt ChargeBox ID miatt keletkezett).
 
@@ -440,7 +501,7 @@ async def admin_reset_cp(
     cp_id: int,
     reset_type: str = Query("Soft", pattern="^(Soft|Hard)$"),
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
 ):
     from app.ocpp.registry import send_call_and_wait
     res = await db.execute(select(ChargePoint).where(ChargePoint.id == cp_id))
@@ -458,7 +519,7 @@ async def admin_reset_cp(
 async def admin_get_cp_config(
     cp_id: int,
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
 ):
     from app.ocpp.registry import send_call_and_wait
     res = await db.execute(select(ChargePoint).where(ChargePoint.id == cp_id))
@@ -490,7 +551,7 @@ async def admin_test_charge(
     cp_id: int,
     body: AdminTestChargeIn,
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
 ):
     """
     Admin teszt-töltés a TELJES Stripe-folyamaton át, kedvezményes árazással:
@@ -596,7 +657,7 @@ async def admin_test_charge(
 @router.get("/sessions")
 async def admin_list_sessions(
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
     active_only: bool = Query(False),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -620,7 +681,7 @@ async def admin_list_sessions(
 async def admin_stop_session(
     session_id: int,
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
 ):
     """OCPP RemoteStop – töltő online kell hozzá."""
     from app.ocpp.ocpp_ws import remote_stop_transaction
@@ -645,7 +706,7 @@ async def admin_stop_session(
 async def admin_force_close_session(
     session_id: int,
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
 ):
     """
     Kényszer lezárás OCPP nélkül – ha a töltő offline és StopTransaction soha nem érkezik.
@@ -676,7 +737,7 @@ async def admin_force_close_session(
 async def admin_resend_receipt(
     session_id: int,
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
 ):
     """Bizonylat email újraküldése a vevőnek."""
     from app.services.email import send_receipt_email
@@ -715,7 +776,7 @@ async def admin_resend_invoice(
     session_id: int,
     force: bool = Query(False, description="Ha már van invoice_number, új számlát állít ki"),
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
 ):
     """
     Számla kiállítása és küldése számlázz.hu-n keresztül.
@@ -777,7 +838,7 @@ async def admin_resend_invoice(
 async def admin_stripe_settle(
     session_id: int,
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
 ):
     """
     Manuális Stripe capture/cancel – ha a töltés végén a settle nem futott le.
@@ -798,7 +859,7 @@ async def admin_stripe_settle(
 @router.get("/intents")
 async def admin_list_intents(
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
@@ -815,7 +876,7 @@ async def admin_list_intents(
 async def admin_refund_intent(
     intent_id: int,
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
 ):
     """
     Azonnali Stripe visszatérítés/felszabadítás egy intentre.
@@ -870,7 +931,7 @@ async def admin_refund_intent(
 async def admin_search(
     q: str = Query(..., min_length=1),
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
 ):
     """
     Keresés email, session ID, invoice szám, OCPP ID alapján.

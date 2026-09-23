@@ -111,6 +111,7 @@ async def get_me(
         "name": ident.name or (user.billing_name if user else None),
         "auth_source": ident.source,
         "keycloak_linked": bool(user and user.keycloak_sub),
+        "is_admin": ident.is_admin,
         "profile": _profile_dict(user),
     }
 

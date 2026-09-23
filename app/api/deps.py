@@ -30,6 +30,7 @@ class Identity:
     source: Literal["email_token", "keycloak"]
     keycloak_sub: Optional[str] = None
     name: Optional[str] = None
+    is_admin: bool = False                       # Keycloak realm-szerep (KEYCLOAK_ADMIN_ROLE) – csak kijelzéshez
 
 
 def _bearer(authorization: Optional[str]) -> Optional[str]:
@@ -65,7 +66,10 @@ async def _identity_from_token(token: str, db: AsyncSession) -> Identity:
         raise HTTPException(status_code=403, detail="keycloak_email_not_verified")
 
     await _link_keycloak_user(db, email=kc.email, sub=kc.sub)
-    return Identity(email=kc.email, source="keycloak", keycloak_sub=kc.sub, name=kc.name)
+    from app.api.routers.admin import admin_role
+
+    return Identity(email=kc.email, source="keycloak", keycloak_sub=kc.sub, name=kc.name,
+                    is_admin=admin_role() in kc.realm_roles)
 
 
 async def _link_keycloak_user(db: AsyncSession, email: str, sub: str) -> None:

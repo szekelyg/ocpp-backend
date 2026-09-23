@@ -13,6 +13,11 @@ function AccountArea() {
   }
   return (
     <div className="flex items-center gap-2">
+      {me?.is_admin && (
+        <Link to="/admin" className="text-xs font-semibold text-brand-action hover:underline" title="Admin felület">
+          Admin
+        </Link>
+      )}
       <Link to="/toltesek" className="btn btnGhost !py-1.5 !px-3 !text-xs max-w-[200px]">
         <span className="truncate">{me?.email}</span>
       </Link>

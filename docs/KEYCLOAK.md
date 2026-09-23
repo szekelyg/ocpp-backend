@@ -108,7 +108,8 @@ Közös függőség: `app.api.deps.get_current_identity` → `Identity(email, so
 vendég-módba); `email_from_authorization` (nem dob) ott, ahol a Bearer csak egy a bizonyítékok
 közül (`POST /api/sessions/{id}/stop`).
 
-Az admin Basic auth (`verify_admin`) és az `/api/admin/*` végpontok érintetlenek.
+Az admin felület (`/api/admin/*`, `/api/sessions/*` admin-végpontjai) 2026-09-23-tól szintén
+Keycloakkal megy – lásd a 6. szakaszt.
 
 ## 4. Végpontok
 
@@ -230,3 +231,37 @@ kötelező mezők, rossz Bearer → 401.
 3. `./deploy.sh` (változatlan) – build felrakja a PyJWT-t, a migráció felmegy.
 4. Ellenőrzés: `curl https://ev.energiafelho.hu/api/auth/keycloak/config` → `enabled: true`;
    böngészőben `/toltesek` → „Belépés Energiafelhő-fiókkal" → Keycloak → vissza → lista.
+
+## 6. Admin felület az Energiafelhő-fiókkal (2026-09-23)
+
+`ev.energiafelho.hu/admin` → „Belépés Energiafelhő-fiókkal” (ugyanaz a PKCE-folyamat, mint a
+Töltéseim; a callback `/admin`-ra hoz vissza). Már belépett fiókkal (Töltéseim, portál SSO)
+kód nélkül, azonnal. A fejlécben admin-fióknál „Admin” link is van (`/api/me` → `is_admin`).
+
+**Ki admin?** Akinek a Keycloak `ugyfelek` realmben megvan az **`ev-admin` realm-szerep**.
+A backend (`app/api/routers/admin.py` `verify_admin`) a Bearer access token
+`realm_access.roles` listájában keresi (`KEYCLOAK_ADMIN_ROLE` env, alap `ev-admin`); a
+szerepet az `ev` kliens alap `roles` client scope-ja teszi a tokenbe, külön mapper nem kell.
+Kiosztás **kcadm-szkripttel** a platform-repóból (nem csak admin-konzolból, hogy a realm-export
+és az élő állapot ne csússzon szét):
+
+```
+cd /opt/energiafelho-platform
+KC_ADMIN_PASSWORD='…' EV_ADMINS='gellert@energiafelho.hu' sh keycloak/scripts/apply-ev-admin-role.sh
+# visszavonás: REVERT=1 EV_ADMINS='valaki@…' sh keycloak/scripts/apply-ev-admin-role.sh
+```
+
+A szerep a következő access tokentől él (max. 5 perc, vagy ki-be lépés).
+
+| Kérés | Válasz |
+|---|---|
+| Bearer, érvényes token, `ev-admin` szereppel | 200 |
+| Bearer, érvényes token, szerep nélkül | **403** `admin_role_missing` (a SPA: „Nincs admin-jogod” oldal, „Másik fiókkal” gomb) |
+| Bearer, rossz/lejárt token | 401 `keycloak_<ok>` (a SPA törli a helyi belépést) |
+| Basic (`ADMIN_USERNAME`/`ADMIN_PASSWORD`) | 200 – **vész-út**, csak amíg az `ADMIN_PASSWORD` be van állítva; a SPA-ban `/admin?jelszo=1` |
+| Basic, de nincs `ADMIN_PASSWORD` | 401 `basic_disabled` |
+| header nélkül | 401 `missing_authorization`, `WWW-Authenticate: Bearer` |
+| sem `KEYCLOAK_ISSUER`, sem `ADMIN_PASSWORD` | 503 `admin_not_configured` (fail-closed) |
+
+A Basic vész-út kivezetése: az `ADMIN_PASSWORD` sor törlése a szerver `deploy/.env`-jéből +
+`docker compose up -d backend`. Tesztek: `tests/test_admin_keycloak.py`.

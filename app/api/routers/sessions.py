@@ -6,14 +6,13 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from fastapi.security import HTTPBasicCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import email_from_authorization, get_db
-from app.api.routers.admin import verify_admin
+from app.api.routers.admin import AdminPrincipal, verify_admin
 from app.db.models import ChargePoint, ChargeSession, MeterSample
 from app.ocpp.ocpp_ws import remote_start_transaction, remote_stop_transaction
 from app.ocpp.ocpp_utils import MIN_CHARGE_HUF, _price_huf_per_kwh
@@ -200,7 +199,7 @@ class StopPublicIn(BaseModel):
 @router.get("/", response_model=list[dict])
 async def list_sessions(
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
     charge_point_id: Optional[int] = Query(None, ge=1),
     connector_id: Optional[int] = Query(None, ge=0),
     active_only: bool = Query(False),
@@ -231,7 +230,7 @@ async def get_active_session_for_cp(
     cp_id: int,
     connector_id: Optional[int] = Query(None, ge=0),
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
 ):
     s = await _get_active_session(db, charge_point_id=cp_id, connector_id=connector_id)
     if not s:
@@ -261,7 +260,7 @@ async def get_session_by_intent(
 async def start_session(
     body: StartSessionIn,
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
 ):
     """Fizetés nélküli RemoteStart – admin only.
 
@@ -307,7 +306,7 @@ async def start_session(
 async def stop_session(
     body: StopSessionIn,
     db: AsyncSession = Depends(get_db),
-    _: HTTPBasicCredentials = Depends(verify_admin),
+    _: AdminPrincipal = Depends(verify_admin),
 ):
     """Belső / admin stop – stop_code nélkül. Az ügyfél a /{session_id}/stop-ot hívja."""
     res = await db.execute(

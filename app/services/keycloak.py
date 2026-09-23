@@ -59,6 +59,15 @@ class KeycloakIdentity:
     azp: Optional[str]
     claims: dict = field(default_factory=dict, compare=False, repr=False)
 
+    @property
+    def realm_roles(self) -> frozenset[str]:
+        """A token `realm_access.roles` listája (a Keycloak alap `roles` client scope adja)."""
+        ra = self.claims.get("realm_access")
+        roles = ra.get("roles") if isinstance(ra, dict) else None
+        if not isinstance(roles, (list, tuple)):
+            return frozenset()
+        return frozenset(r for r in roles if isinstance(r, str))
+
 
 # ---------------------------------------------------------------------------
 # Konfiguráció (env – futásidőben olvasva, hogy a tesztek is át tudják állítani)

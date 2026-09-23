@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getCurrentPosition, ACCURACY_WARN_M } from "../utils/geolocate";
 import CoordPicker from "../components/map/CoordPicker";
+import KeycloakLoginButton from "../components/ui/KeycloakLoginButton";
+import CloudLogo from "../components/ui/CloudLogo";
+import { authHeaders, clearAuth, isLoggedIn, logout as kcLogout, onAuthChange } from "../utils/auth";
 
 const REFRESH_MS = 15_000;
 
@@ -133,8 +136,75 @@ function Toasts({ toasts }) {
 }
 
 // ── Login ─────────────────────────────────────────────────────────────────────
+//
+// Admin-belépés = Energiafelhő-fiók (Keycloak), `ev-admin` realm-szereppel (2026-09-23).
+// Ugyanaz a PKCE-folyamat, mint a Töltéseim oldalon; a callback ide (/admin) hoz vissza.
+// A régi felhasználónév+jelszó (HTTP Basic) csak vész-út: `/admin?jelszo=1`-gyel érhető el,
+// és csak addig működik, amíg a szerveren be van állítva az ADMIN_PASSWORD.
 
-function LoginForm({ onLogin }) {
+const BASIC_TOKEN_KEY = "admin_token";   // sessionStorage – csak a Basic vész-úthoz
+
+function passwordModeRequested() {
+  try { return new URLSearchParams(window.location.search).get("jelszo") === "1"; } catch { return false; }
+}
+
+function LoginShell({ children }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6">
+      <div className="w-full max-w-sm bg-white border border-brand-line rounded-2xl p-8 shadow-card">
+        <div className="text-center mb-6">
+          <div className="flex justify-center mb-3"><CloudLogo size={36} /></div>
+          <div className="text-2xl font-bold text-ink">Admin</div>
+          <div className="text-sm text-ink-soft mt-1">Energiafelhő Kft. – EV töltőhálózat</div>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function KeycloakLogin({ onBasic }) {
+  const [err, setErr] = useState("");
+  return (
+    <LoginShell>
+      <div className="space-y-4">
+        <KeycloakLoginButton returnTo="/admin" onError={setErr} />
+        <p className="text-xs text-ink-soft text-center">
+          Az admin felülethez az Energiafelhő-fiókodhoz rendelt admin-jog kell.
+        </p>
+        {err && <div className="text-sm text-rose-600 text-center">{err}</div>}
+        {onBasic && (
+          <button type="button" onClick={onBasic}
+            className="block mx-auto text-xs text-ink-muted hover:text-ink underline">
+            Jelszóval (vész-út)
+          </button>
+        )}
+      </div>
+    </LoginShell>
+  );
+}
+
+function NoAdminRole({ email, onLogout }) {
+  return (
+    <LoginShell>
+      <div className="space-y-4 text-center">
+        <div className="text-3xl">🔒</div>
+        <div className="text-lg font-semibold text-ink">Nincs admin-jogod</div>
+        <p className="text-sm text-ink-soft">
+          {email ? <>A <span className="font-medium text-ink">{email}</span> fiók be van lépve, de </> : "Ez a fiók "}
+          nincs admin-jogosultsága az EV töltőhálózathoz. Az admin-jogot a Keycloakban
+          (id.energiafelho.hu, <code>ev-admin</code> szerep) lehet megadni.
+        </p>
+        <div className="flex gap-2 justify-center">
+          <a href="/" className="btn btnGhost inline-flex">← Vissza a töltőkhöz</a>
+          <button type="button" onClick={onLogout} className="btn btnPrimary inline-flex">Másik fiókkal</button>
+        </div>
+      </div>
+    </LoginShell>
+  );
+}
+
+function BasicLoginForm({ onLogin, onBack }) {
   const [user, setUser] = useState("");
   const [pass, setPass] = useState("");
   const [err, setErr] = useState("");
@@ -149,40 +219,41 @@ function LoginForm({ onLogin }) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-sm bg-white border border-brand-line rounded-2xl p-8 shadow-card">
-        <div className="text-center mb-6">
-          <div className="text-2xl font-bold text-ink">Admin</div>
-          <div className="text-sm text-ink-soft mt-1">Energiafelhő Kft.</div>
+    <LoginShell>
+      <form onSubmit={submit} className="space-y-4">
+        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Vész-út: felhasználónév + jelszó. A rendes belépés az Energiafelhő-fiókkal történik.
         </div>
-        <form onSubmit={submit} className="space-y-4">
-          <div>
-            <label className="block text-xs text-ink-soft mb-1.5">Felhasználónév</label>
-            <input
-              className="field"
-              value={user} onChange={e => setUser(e.target.value)}
-              autoFocus autoComplete="username"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-ink-soft mb-1.5">Jelszó</label>
-            <input
-              type="password"
-              className="field"
-              value={pass} onChange={e => setPass(e.target.value)}
-              autoComplete="current-password"
-            />
-          </div>
-          {err && <div className="text-sm text-rose-600">{err}</div>}
-          <button
-            type="submit" disabled={busy}
-            className="w-full rounded-xl bg-brand-action hover:bg-[#2451bd] text-white font-semibold py-2.5 text-sm transition disabled:opacity-50"
-          >
-            {busy ? "…" : "Bejelentkezés"}
-          </button>
-        </form>
-      </div>
-    </div>
+        <div>
+          <label className="block text-xs text-ink-soft mb-1.5">Felhasználónév</label>
+          <input
+            className="field"
+            value={user} onChange={e => setUser(e.target.value)}
+            autoFocus autoComplete="username"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-ink-soft mb-1.5">Jelszó</label>
+          <input
+            type="password"
+            className="field"
+            value={pass} onChange={e => setPass(e.target.value)}
+            autoComplete="current-password"
+          />
+        </div>
+        {err && <div className="text-sm text-rose-600">{err}</div>}
+        <button
+          type="submit" disabled={busy}
+          className="w-full rounded-xl bg-brand-action hover:bg-[#2451bd] text-white font-semibold py-2.5 text-sm transition disabled:opacity-50"
+        >
+          {busy ? "…" : "Bejelentkezés"}
+        </button>
+        <button type="button" onClick={onBack}
+          className="block mx-auto text-xs text-ink-muted hover:text-ink underline">
+          ← Belépés Energiafelhő-fiókkal
+        </button>
+      </form>
+    </LoginShell>
   );
 }
 
@@ -1444,7 +1515,13 @@ const TABS = [
 ];
 
 export default function AdminPage() {
-  const [token, setToken] = useState(() => sessionStorage.getItem("admin_token") || "");
+  // Belépés: Keycloak (localStorage ef_kc_session, utils/auth) VAGY Basic vész-token.
+  const [basicToken, setBasicToken] = useState(() => sessionStorage.getItem(BASIC_TOKEN_KEY) || "");
+  const [kcLoggedIn, setKcLoggedIn] = useState(isLoggedIn());
+  const [noRole, setNoRole] = useState(null);          // { email } ha a fiók belépett, de nincs ev-admin szerepe
+  const [basicMode, setBasicMode] = useState(passwordModeRequested);
+  const token = basicToken || (kcLoggedIn ? "keycloak" : "");
+  useEffect(() => onAuthChange(() => { setKcLoggedIn(isLoggedIn()); setNoRole(null); }), []);
   const [tab, setTab] = useState("overview");
   const [stats, setStats] = useState(null);
   const [chargers, setChargers] = useState([]);
@@ -1455,17 +1532,32 @@ export default function AdminPage() {
   const { toasts, add: toast } = useToast();
 
   const apiFetch = useCallback(async (path, opts = {}) => {
+    const auth = basicToken ? { Authorization: `Basic ${basicToken}` } : await authHeaders();
     const res = await fetch(path, {
       ...opts,
       headers: {
-        Authorization: `Basic ${token}`,
+        ...auth,
         ...(opts.headers || {}),
       },
     });
     if (res.status === 401) {
-      sessionStorage.removeItem("admin_token");
-      setToken("");
+      // lejárt/érvénytelen belépés → vissza a belépőre
+      if (basicToken) { sessionStorage.removeItem(BASIC_TOKEN_KEY); setBasicToken(""); }
+      else clearAuth();
       throw new Error("401");
+    }
+    if (res.status === 403 && !basicToken) {
+      const data = await res.clone().json().catch(() => ({}));
+      if (data?.detail === "admin_role_missing") {
+        // érvényes Energiafelhő-fiók, de nincs ev-admin szerepe
+        let email = "";
+        try {
+          const me = await fetch("/api/me", { headers: { ...auth, Accept: "application/json" } });
+          if (me.ok) email = (await me.json())?.email || "";
+        } catch { /* ignore */ }
+        setNoRole({ email });
+        throw new Error("403");
+      }
     }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -1478,7 +1570,7 @@ export default function AdminPage() {
       throw err;
     }
     return data;
-  }, [token]);
+  }, [basicToken]);
 
   const refresh = useCallback(async () => {
     if (!token) return;
@@ -1496,7 +1588,7 @@ export default function AdminPage() {
       setIntents(ints);
       setLastUpdated(new Date());
     } catch (e) {
-      if (e.message !== "401") toast("Frissítési hiba: " + e.message, "err");
+      if (e.message !== "401" && e.message !== "403") toast("Frissítési hiba: " + e.message, "err");
     } finally {
       setLoading(false);
     }
@@ -1508,20 +1600,40 @@ export default function AdminPage() {
     return () => clearInterval(t);
   }, [refresh]);
 
-  async function handleLogin(user, pass, setErr) {
+  async function handleBasicLogin(user, pass, setErr) {
     const t = btoa(`${user}:${pass}`);
     try {
       const res = await fetch("/api/admin/stats", { headers: { Authorization: `Basic ${t}` } });
-      if (res.status === 401) { setErr("Hibás felhasználónév vagy jelszó."); return; }
+      if (res.status === 401) {
+        const data = await res.json().catch(() => ({}));
+        setErr(data?.detail === "basic_disabled"
+          ? "A jelszavas vész-út ki van kapcsolva a szerveren – lépj be az Energiafelhő-fiókoddal."
+          : "Hibás felhasználónév vagy jelszó.");
+        return;
+      }
       if (!res.ok) { setErr(`Szerverhiba: HTTP ${res.status}`); return; }
     } catch { setErr("Szerver nem elérhető."); return; }
-    sessionStorage.setItem("admin_token", t);
-    setToken(t);
+    sessionStorage.setItem(BASIC_TOKEN_KEY, t);
+    setBasicToken(t);
+    setBasicMode(false);
+  }
+
+  function handleLogout() {
+    if (basicToken) {
+      sessionStorage.removeItem(BASIC_TOKEN_KEY);
+      setBasicToken("");
+      return;
+    }
+    kcLogout({ redirectTo: "/admin" });
   }
 
   const missingInvoices = stats?.alerts?.missing_invoices || 0;
 
-  if (!token) return <LoginForm onLogin={handleLogin} />;
+  if (!token) {
+    if (basicMode) return <BasicLoginForm onLogin={handleBasicLogin} onBack={() => setBasicMode(false)} />;
+    return <KeycloakLogin onBasic={passwordModeRequested() ? () => setBasicMode(true) : null} />;
+  }
+  if (noRole) return <NoAdminRole email={noRole.email} onLogout={handleLogout} />;
 
   return (
     <div className="min-h-screen">
@@ -1555,7 +1667,7 @@ export default function AdminPage() {
           <div className="flex items-center gap-3">
             <button onClick={() => setTab("search")} className="text-xs text-brand-action hover:underline">Keresés</button>
             <button onClick={refresh} className="text-xs text-ink-soft hover:text-ink">Frissít</button>
-            <button onClick={() => { sessionStorage.removeItem("admin_token"); setToken(""); }}
+            <button onClick={handleLogout}
               className="text-xs text-ink-muted hover:text-ink">Kilépés</button>
           </div>
         </div>
