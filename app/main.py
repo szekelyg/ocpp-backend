@@ -18,6 +18,7 @@ from app.api.routers.intents import router as intents_router
 from app.api.routers.admin import router as admin_router
 from app.api.routers.auth import router as auth_router
 from app.api.routers.me import router as me_router
+from app.api.routers.integration import router as integration_router
 from app.core.cors import PathScopedCORS, portal_origins
 from app.ocpi.router import router as ocpi_router
 from app.ocpi.errors import add_ocpi_exception_handlers
@@ -303,6 +304,7 @@ app.include_router(intents_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(me_router, prefix="/api")
+app.include_router(integration_router, prefix="/api")
 
 # CORS csak a /api/me/* útvonalon, a portál (my.energiafelho.hu) originjére: Bearer token,
 # cookie nélkül (allow_credentials=False). A többi végpont CORS-viselkedése változatlan.
