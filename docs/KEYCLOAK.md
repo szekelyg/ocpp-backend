@@ -265,3 +265,86 @@ A szerep a következő access tokentől él (max. 5 perc, vagy ki-be lépés).
 
 A Basic vész-út kivezetése: az `ADMIN_PASSWORD` sor törlése a szerver `deploy/.env`-jéből +
 `docker compose up -d backend`. Tesztek: `tests/test_admin_keycloak.py`.
+
+## 8. Integrációs kliens az energiaközösségi platformnak (`ek-integracio`, 2026-09-24)
+
+Az ek (app.energiafelho.hu, flexibox) a töltőket mérési pontok **almérőjeként** mutatja
+(elszámolás 2.0, D lépés; az almérő csak megjelenítés, nem számol az elszámolásba). Ehhez
+gép-gép hívással olvas az ev-ből: `app/api/routers/integration.py`.
+
+### Keycloak (realm `ugyfelek`)
+
+| Beállítás | Érték |
+|---|---|
+| Client ID | `ek-integracio` |
+| Client authentication | **On** (confidential), titok az ek szerver `.env`-jében |
+| Service accounts (client-credentials) | **On** – minden más flow (standard, direct access, implicit) **Off** |
+| Realm-szerep | **`ek-integracio`** – a kliens service-account userére kiosztva |
+| Audience mapper | Included Client Audience: **`ev`**, access tokenbe – enélkül a token `aud`-ja csak `account`, és az ev 401 `keycloak_invalid_audience`-szel elutasítja |
+
+Létrehozás/visszavonás kcadm-szkripttel a platform-repóból (idempotens):
+
+```
+cd /opt/energiafelho-platform
+KC_ADMIN_PASSWORD='…' sh keycloak/scripts/apply-ek-integracio.sh      # kiírja a kliens titkát
+REVERT=1 KC_ADMIN_PASSWORD='…' sh keycloak/scripts/apply-ek-integracio.sh
+```
+
+**Legkisebb jogosultság:** a szerep NEM az `ev-admin`, és fordítva: az integrációs token
+az `/api/admin/*`-ra 403-at kap. Az integrációs végpontok nem adnak ki személyes adatot
+(e-mail, számlázási adat, töltés-tulajdonos), csak töltőazonosítót, helyszínt és energiát.
+
+### Backend env (opcionális, az alapértékek jók)
+
+```
+# KEYCLOAK_INTEGRATION_ROLE=ek-integracio        # a megkövetelt realm-szerep
+# KEYCLOAK_INTEGRATION_CLIENTS=ek-integracio     # engedélyezett azp-k (vesszővel); üres = csak a szerep számít
+```
+
+A `KEYCLOAK_ISSUER` és `KEYCLOAK_AUDIENCE` (2. szakasz) kell hozzá; Keycloak nélkül a
+végpontok **503** `integration_not_configured` (nincs Basic vész-út).
+
+| Kérés | Válasz |
+|---|---|
+| service-account token, szerep + azp rendben | 200 |
+| nincs header / nem Bearer | 401 `missing_bearer_token` / `unsupported_auth_scheme` |
+| rossz/lejárt token, rossz aud | 401 `keycloak_<ok>` |
+| érvényes token, szerep nélkül (pl. ügyfél vagy `ev-admin`) | 403 `integration_role_missing` |
+| szerep megvan, de más kliens kérte (pl. az `ev` SPA-ból) | 403 `integration_client_not_allowed` |
+
+### `GET /api/integration/charge-points`
+
+```json
+[{ "id": "nograd_var_1", "nev": "Nógrádi vár (nograd_var_1)", "helyszin": "Nógrádi vár",
+   "cim": "…", "max_power_kw": 22.0, "online": true, "allapot": "available", "publikalt": true }]
+```
+Minden töltő (a még nem publikált is). Az `id` az **OCPP-azonosító** – ezt tárolja az ek
+`kulso_azonosito`-ként.
+
+### `GET /api/integration/charge-points/{id}/negyedorak?from=<unix>&to=<unix>`
+
+```json
+{ "id": "nograd_var_1", "from": 1788256800, "to": 1788260400, "negyedora_s": 900, "egyseg": "Wh",
+  "negyedorak": [ { "ts": 1788256800, "wh": 3000.0, "modszer": "meter_values" },
+                  { "ts": 1788257700, "wh": 1500.0, "modszer": "session_aranyositas" } ] }
+```
+
+- `ts` = a negyedóra **kezdete**, unix mp, 900-zal osztható. `from` lefelé, `to` felfelé
+  igazítva, `to` kizáró; legfeljebb **31 nap** (különben 400 `window_too_large`).
+- Csak **lezárt** negyedóra: a `to` legfeljebb a folyó negyedóra eleje.
+- **Nincs adat → nincs sor** (nem 0). Töltésen (session) belül a mért 0 Wh viszont 0.
+- Forrás (`app/services/negyedorak.py`):
+  1. `meter_values` – a sessionhöz kötött MeterValues-minták
+     (`meter_samples.energy_wh_total`, Energy.Active.Import.Register) kumulált görbéje,
+     a minták között lineáris interpolációval. A regiszter skálája töltőnként más
+     (élettartam vagy session-relatív); az alapszint meterStart / 0 / első minta. Ha a lezárt
+     session számlázott energiája (`energy_kwh`) kisebb a mintákénál, a görbe arányosan
+     leskálázódik – a negyedórák összege nem lehet több a kiszámlázottnál.
+  2. `session_aranyositas` – ha a sessionnek nincs energiamintája: a lezárt session
+     energiája egyenletesen, időarányosan szétosztva a negyedóráira (közelítés).
+- Folyamatban lévő töltésnél a görbe az utolsó mintánál ér véget, így a legutolsó
+  negyedóra még nőhet: az ek a lekérést **átfedéssel** ismétli (upsert), és a töltés
+  lezárása után a végleges érték felülírja a korábbit.
+- Az állomás-szintű (connector 0, tranzakció nélküli) óraminták itt nem számítanak.
+
+Tesztek: `tests/test_integration_negyedorak.py`.
