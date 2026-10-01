@@ -11,6 +11,7 @@ Konfig /etc/ocpp-backend.env-ben:
 """
 from __future__ import annotations
 
+import re
 import asyncio
 import logging
 import os
@@ -107,6 +108,18 @@ async def fetch_invoice_pdf(invoice_number: str) -> Optional[bytes]:
         return None
 
 
+# Energiafelhő (2026-10-01): korábban minden vevő -1 („nem ismert / magánszemély”) volt, a céges
+# számlát kérők is. Számlázz.hu Agent: 1 = belföldi ÁFA-alany (magyar adószámmal), -1 = magánszemély / nem ismert.
+_HU_ADOSZAM = re.compile(r"^\d{8}-?\d-?\d{2}$")
+
+
+def _tax_subject(billing_type: Optional[str], tax_number: Optional[str]) -> int:
+    """Vevő adóalanyisága: céges számla magyar adószámmal → 1, minden más → -1."""
+    if billing_type == "business" and tax_number and _HU_ADOSZAM.match(tax_number.strip()):
+        return 1
+    return -1
+
+
 async def create_session_invoice(
     session_id: int,
     energy_kwh: Optional[float],
@@ -176,7 +189,7 @@ async def create_session_invoice(
             address=address_parts or "-",
             email=buyer_email,
             tax_number=buyer_tax_number or "",
-            tax_subject=-1,  # -1 = nem ismert / magánszemély
+            tax_subject=_tax_subject(billing_type, buyer_tax_number),
             send_email=True,
         )
 
