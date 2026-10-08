@@ -6,7 +6,6 @@ import PayCancel from "./pages/PayCancel.jsx";
 import ChargingPage from "./pages/ChargingPage.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
 import Aszf from "./pages/Aszf.jsx";
-import Adatkezeles from "./pages/Adatkezeles.jsx";
 import NotFound from "./pages/NotFound.jsx";
 import MySessions from "./pages/MySessions.jsx";
 import KeycloakCallback from "./pages/KeycloakCallback.jsx";
@@ -20,10 +19,16 @@ export default function App() {
       <Route path="/charging/:sessionId" element={<ChargingPage />} />
       <Route path="/admin" element={<AdminPage />} />
       <Route path="/aszf" element={<Aszf />} />
-      <Route path="/adatkezeles" element={<Adatkezeles />} />
+      <Route path="/adatkezeles" element={<AdatkezelesAtiranyitas />} />
       <Route path="/toltesek" element={<MySessions />} />
       <Route path="/auth/keycloak/callback" element={<KeycloakCallback />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
+}
+// Energiafelhő, 2026-10-08: egyetlen, közös adatkezelési tájékoztató van (az ev-re is kiterjed);
+// a régi /adatkezeles cím (ÁSZF, e-mailek, könyvjelzők) oda visz tovább.
+function AdatkezelesAtiranyitas() {
+  window.location.replace("https://my.energiafelho.hu/adatkezeles");
+  return null;
 }

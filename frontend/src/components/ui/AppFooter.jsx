@@ -25,7 +25,7 @@ export default function AppFooter() {
             <a href="/aszf" className="text-ink-soft hover:text-brand-action transition">
               Általános Szerződési Feltételek
             </a>
-            <a href="/adatkezeles" className="text-ink-soft hover:text-brand-action transition">
+            <a href="https://my.energiafelho.hu/adatkezeles" className="text-ink-soft hover:text-brand-action transition">
               Adatkezelési tájékoztató
             </a>
           </nav>

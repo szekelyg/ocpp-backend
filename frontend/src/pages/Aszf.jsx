@@ -259,8 +259,8 @@ export default function Aszf() {
           </Sub>
           <Sub n="11.2">
             Az adatkezelés részletes szabályait a külön{" "}
-            <a className="text-brand-action hover:underline" href="/adatkezeles">Adatkezelési tájékoztató</a>{" "}
-            tartalmazza, amely a Weboldalon érhető el.
+            <a className="text-brand-action hover:underline" href="https://my.energiafelho.hu/adatkezeles">Adatkezelési tájékoztató</a>{" "}
+            tartalmazza, amely a my.energiafelho.hu/adatkezeles címen érhető el.
           </Sub>
         </Section>
 
