@@ -164,8 +164,82 @@ async def test_publish_blocked_until_complete(client):
     assert (await client.get("/api/charge-points/")).json() == []
 
 
+class _FakeCharger:
+    """A töltő OCPP-oldala: online-e, és mit válaszol az AuthorizationKey-re."""
+    def __init__(self, monkeypatch, online=True, status="Accepted"):
+        import app.ocpp.registry as reg
+        self.calls = []
+
+        async def get_ws(cp_id):
+            return object() if online else None
+
+        async def change_configuration(cp_id, key, value):
+            self.calls.append(("ChangeConfiguration", cp_id, key, value))
+            return {"status": status}
+
+        async def send_call_and_wait(cp_id, action, payload, timeout_s=12.0):
+            self.calls.append((action, cp_id, payload))
+            return {"status": "Accepted"}
+
+        monkeypatch.setattr(reg, "get_ws", get_ws)
+        monkeypatch.setattr(reg, "change_configuration", change_configuration)
+        monkeypatch.setattr(reg, "send_call_and_wait", send_call_and_wait)
+
+
+async def _key_hash(cp_id):
+    async with TestSession() as s:
+        return (await s.execute(select(ChargePoint.ocpp_auth_key_hash).where(ChargePoint.id == cp_id))).scalar_one()
+
+
 @pytest.mark.asyncio
-async def test_configure_then_publish(client):
+async def test_publish_sets_ocpp_key_and_resets(client, monkeypatch):
+    import asyncio
+    from app.ocpp import auth as ocpp_auth
+    charger = _FakeCharger(monkeypatch)
+    cp_id, _ = await _seed_cp("CP-KEY")
+
+    r = await client.put(f"/api/admin/charge-points/{cp_id}", json={"is_published": True}, headers=ADMIN_AUTH)
+    assert r.status_code == 200, r.text
+    assert r.json()["ocpp_auth_key_set"] is True and r.json()["is_published"] is True
+    await asyncio.sleep(0.05)  # a Soft reset háttérben megy
+
+    (_, _, key_name, key), (action, _, payload) = charger.calls
+    assert key_name == "AuthorizationKey" and len(key) == 32
+    assert action == "Reset" and payload == {"type": "Soft"}
+    assert ocpp_auth.verify_password(key.encode(), await _key_hash(cp_id))
+    assert key not in r.text                     # a kulcs nem megy ki az admin válaszban sem
+
+
+@pytest.mark.asyncio
+async def test_publish_keeps_existing_key(client, monkeypatch):
+    charger = _FakeCharger(monkeypatch)
+    cp_id, _ = await _seed_cp("CP-HASKEY")
+    async with TestSession() as s:
+        cp = await s.get(ChargePoint, cp_id)
+        cp.ocpp_auth_key_hash = "meglevo"
+        await s.commit()
+    r = await client.put(f"/api/admin/charge-points/{cp_id}", json={"is_published": True}, headers=ADMIN_AUTH)
+    assert r.status_code == 200 and r.json()["ocpp_auth_key_set"] is False
+    assert charger.calls == [] and await _key_hash(cp_id) == "meglevo"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("online,status,code,error", [
+    (False, "Accepted", 409, "charger_offline"),
+    (True, "Rejected", 502, "auth_key_rejected"),
+])
+async def test_publish_blocked_without_key(client, monkeypatch, online, status, code, error):
+    _FakeCharger(monkeypatch, online=online, status=status)
+    cp_id, _ = await _seed_cp(f"CP-NOKEY-{code}")
+    r = await client.put(f"/api/admin/charge-points/{cp_id}", json={"is_published": True}, headers=ADMIN_AUTH)
+    assert r.status_code == code and r.json()["detail"]["error"] == error
+    assert await _key_hash(cp_id) is None
+    assert (await client.get("/api/charge-points/")).json() == []
+
+
+@pytest.mark.asyncio
+async def test_configure_then_publish(client, monkeypatch):
+    _FakeCharger(monkeypatch)
     cp_id, _ = await _seed_cp("CP-CONFIG", with_location=False,
                               connector_type=None, max_power_kw=None)
 

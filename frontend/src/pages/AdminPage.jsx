@@ -365,6 +365,14 @@ const MISSING_LABELS = {
   max_power_kw: "teljesítmény",
 };
 
+// Publikáláskor a töltő megkapja az OCPP-jelszavát – ehhez online kell lennie.
+const PUBLISH_ERRORS = {
+  charger_offline: "a töltő most nem kapcsolódik – publikáláskor kapja meg a jelszavát, ehhez online kell lennie",
+  charger_busy: "a töltőn épp töltés megy – a végén próbáld újra",
+  auth_key_rejected: "a töltő nem fogadta el az OCPP-jelszót",
+  auth_key_failed: "a töltő nem válaszolt a jelszó beállítására",
+};
+
 function Field({ label, hint, children }) {
   return (
     <label className="block">
@@ -694,13 +702,15 @@ function ChargersTab({ chargers, apiFetch, toast, onRefresh }) {
     if (publish !== null) body.is_published = publish;
     setSaveBusy(true);
     try {
-      await apiFetch(`/api/admin/charge-points/${cp.id}`, {
+      const saved = await apiFetch(`/api/admin/charge-points/${cp.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       toast(
-        publish === true ? `${cp.ocpp_id} publikálva – megjelent az éles appban`
+        publish === true && saved?.ocpp_auth_key_set
+          ? `${cp.ocpp_id} publikálva – megkapta az OCPP-jelszavát, újraindul és jelszóval csatlakozik vissza`
+        : publish === true ? `${cp.ocpp_id} publikálva – megjelent az éles appban`
         : publish === false ? `${cp.ocpp_id} visszavonva az éles appból`
         : `${cp.ocpp_id} beállításai mentve`,
         "ok"
@@ -712,7 +722,7 @@ function ChargersTab({ chargers, apiFetch, toast, onRefresh }) {
       const d = e.detail;
       const msg = d?.error === "incomplete_configuration"
         ? `Hiányzó adat: ${(d.missing_fields || []).map(f => MISSING_LABELS[f] || f).join(", ")}`
-        : e.message;
+        : PUBLISH_ERRORS[d?.error] || e.message;
       toast(`Mentés hiba: ${msg}`, "err");
       return false;
     } finally {

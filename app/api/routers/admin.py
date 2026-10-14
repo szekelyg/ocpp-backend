@@ -457,6 +457,47 @@ async def _location_for_cp(db: AsyncSession, cp: ChargePoint) -> Location:
     return loc
 
 
+# Publikáláskor a töltő megkapja a saját OCPP-jelszavát (AuthorizationKey, Basic Auth). Új töltőnél
+# így nem kell a Voltie appban jelszót megadni: a töltő előbb jelszó nélkül, publikálatlanul
+# csatlakozik, élesítéskor pedig mi küldjük ki neki OCPP-n (docs/OCPP-HITELESITES.md).
+_BUSY_STATUSES = {"charging", "suspendedev", "suspendedevse"}
+
+
+async def _set_ocpp_key_for_publish(cp: ChargePoint) -> bool:
+    """Kulcs a még kulcs nélküli töltőnek. True = most kapott kulcsot (utána Soft reset kell).
+    Hibánál HTTPException – ilyenkor a töltő nem kerül publikálásra."""
+    from app.ocpp import auth as ocpp_auth
+    from app.ocpp.registry import change_configuration, get_ws
+
+    if cp.ocpp_auth_key_hash:
+        return False
+    if await get_ws(cp.ocpp_id) is None:
+        raise HTTPException(status_code=409, detail={"error": "charger_offline"})
+    if (cp.status or "").lower() in _BUSY_STATUSES:
+        raise HTTPException(status_code=409, detail={"error": "charger_busy"})
+    key = ocpp_auth.generate_key()
+    try:
+        res = await change_configuration(cp.ocpp_id, "AuthorizationKey", key)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail={"error": "auth_key_failed", "reason": str(e)})
+    if (res or {}).get("status") != "Accepted":
+        raise HTTPException(status_code=502, detail={"error": "auth_key_rejected", "ocpp": res})
+    cp.ocpp_auth_key_hash = await asyncio.to_thread(ocpp_auth.hash_key, key)
+    cp.ocpp_auth_key_set_at = _utcnow()
+    logger.warning("publish_ocpp_auth_key cp=%s – kulcs beállítva (a kulcs nem került naplóba)", cp.ocpp_id)
+    return True
+
+
+async def _soft_reset_after_key(ocpp_id: str) -> None:
+    """A Voltie a kulcs beállításakor nem bontja a kapcsolatot; újraindítás után jön vissza jelszóval."""
+    from app.ocpp.registry import send_call_and_wait
+    try:
+        res = await send_call_and_wait(ocpp_id, "Reset", {"type": "Soft"}, timeout_s=15)
+        logger.info("publish_soft_reset cp=%s result=%s", ocpp_id, res)
+    except Exception:
+        logger.exception("publish_soft_reset sikertelen cp=%s", ocpp_id)
+
+
 @router.put("/charge-points/{cp_id}")
 async def admin_configure_charge_point(
     cp_id: int,
@@ -524,6 +565,7 @@ async def admin_configure_charge_point(
     await db.flush()
     await db.refresh(cp, attribute_names=["location"])
 
+    key_set = False
     if "is_published" in data:
         want = bool(data["is_published"])
         if want:
@@ -533,6 +575,8 @@ async def admin_configure_charge_point(
                     status_code=409,
                     detail={"error": "incomplete_configuration", "missing_fields": missing},
                 )
+            if not cp.is_published:
+                key_set = await _set_ocpp_key_for_publish(cp)
         cp.is_published = want
 
     cp.ocpi_last_updated = _utcnow()
@@ -550,10 +594,11 @@ async def admin_configure_charge_point(
     )
     if load_changed:
         # minden csoport újraosztva (a töltő ki is kerülhetett egy csoportból)
-        import asyncio
         from app.services.load_balance import rebalance_all
         asyncio.create_task(rebalance_all("admin-config"))
-    return _cp_dict_admin(cp)
+    if key_set:
+        asyncio.create_task(_soft_reset_after_key(cp.ocpp_id))
+    return {**_cp_dict_admin(cp), "ocpp_auth_key_set": key_set}
 
 
 @router.delete("/charge-points/{cp_id}")

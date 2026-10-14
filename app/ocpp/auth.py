@@ -174,6 +174,7 @@ def evaluate(
     authorization: Optional[str],
     scheme: str,
     mode: Optional[AuthMode] = None,
+    cp_published: bool = True,
 ) -> AuthDecision:
     """Eldönti, beengedjük-e a kapcsolatot (a DB-írás/naplózás a hívó dolga)."""
     mode = mode or auth_mode()
@@ -195,10 +196,15 @@ def evaluate(
         return AuthDecision(result=result, scheme=scheme, accept=True)
 
     # enforce
-    if not cp_id or not cp_known:
+    if not cp_id:
         return AuthDecision(result=result, scheme=scheme, accept=False, http_status=403, reason="unknown_cp")
     if scheme != "wss":
         return AuthDecision(result=result, scheme=scheme, accept=False, http_status=403, reason="tls_required")
+    if not cp_known or (not key_hash and not cp_published):
+        # Új töltő felvétele: az új (ismeretlen) vagy még publikálatlan, kulcs nélküli töltő jelszó
+        # nélkül is kapcsolódhat – fizetés nem indítható rá, a térképen és az OCPI-ban nem látszik.
+        # A jelszót publikáláskor kapja meg (admin PUT is_published=true), onnantól kötelező.
+        return AuthDecision(result=result, scheme=scheme, accept=True)
     if result != "ok":
         return AuthDecision(result=result, scheme=scheme, accept=False, http_status=401, reason=result)
     return AuthDecision(result=result, scheme=scheme, accept=True)

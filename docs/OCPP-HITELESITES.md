@@ -43,9 +43,15 @@ szerver localhostján van kint (`127.0.0.1:8010`), publikusan kizárólag a tunn
      ahhoz, hogy egy hálózati kiesés után újracsatlakozó töltő ne ragadjon ki egy félig halott
      régi kapcsolat miatt; a lezárással megszűnt a két élő kapcsolat váltakozása is.
   A bevezetés előtt (senkinek nincs kulcsa) ez a régi „legújabb nyer" viselkedés.
-- **Ismeretlen ocpp_id**: `off`/`log` módban beengedjük (onboarding, mint eddig, figyelmeztető
-  loggal); `enforce` módban elutasítjuk. Enforce mellett új töltő felvétele: előbb a töltő sorát
-  kell létrehozni és kulcsot generálni (vagy a felvétel idejére `log` mód).
+- **Új töltő felvétele (enforce mellett is):** az ismeretlen ocpp_id, illetve a publikálatlan,
+  kulcs nélküli töltő wss-en jelszó nélkül is kapcsolódhat (fizetés nem indítható rá, nem látszik).
+  A Voltie appban csak a backend címet és az azonosítót kell megadni, jelszót nem. A jelszót a
+  **Publikálás** adja: az admin `PUT /api/admin/charge-points/{id}` `is_published=true` kérésre,
+  ha a töltőnek még nincs kulcsa, a backend generál egyet, kiküldi (`ChangeConfiguration
+  AuthorizationKey`), és csak `Accepted` után publikál, majd Soft resetet küld; a töltő jelszóval
+  jön vissza. Ha a töltő offline (409 `charger_offline`), épp tölt (409 `charger_busy`) vagy
+  elutasítja (502 `auth_key_rejected`), nem kerül publikálásra. Publikált vagy kulccsal rendelkező
+  töltő enforce módban csak helyes jelszóval jöhet be.
 
 ### Admin végpontok (Keycloak `ev-admin` / vész-Basic)
 
@@ -61,6 +67,9 @@ Az `OCPPBackendJSONURL` átírására nincs külön végpont; ezt a jóváhagyot
 egyszeri, admin-hitelesített hívással (vagy a Voltie saját felületén) kell elvégezni.
 
 ## 3. Bevezetési terv – töltőnként (Gellért jóváhagyásával)
+
+**Állapot 2026-10-14:** mind a 6 publikus töltőn kész (A és B lépés), `ocpp_auth_last_result = ok`.
+Hátra: C (enforce).
 
 Előfeltétel: a backend `OCPP_AUTH_MODE=log`-ban fut (ez már éles), aktív töltés nincs a töltőn.
 Az első töltőt olyan helyen válasszuk, ahol baj esetén helyszínen / a Voltie felületén hozzá

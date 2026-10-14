@@ -261,9 +261,17 @@ def test_evaluate_modes():
     d = ev(cp_id="CP1", cp_known=True, key_hash=h, authorization=_basic("CP1", "x" * 40), scheme="wss", mode="enforce")
     assert not d.accept and d.http_status == 401
     d = ev(cp_id="CP1", cp_known=True, key_hash=None, authorization=None, scheme="wss", mode="enforce")
-    assert not d.accept and d.result == "no_key"
-    assert not ev(cp_id="X", cp_known=False, key_hash=None, authorization=None, scheme="wss", mode="enforce").accept
+    assert not d.accept and d.result == "no_key"          # publikált, kulcs nélkül: kizárva
     assert not ev(cp_id=None, cp_known=False, key_hash=None, authorization=None, scheme="wss", mode="enforce").accept
+    # új töltő felvétele: ismeretlen vagy publikálatlan + kulcs nélküli töltő wss-en beengedve
+    assert ev(cp_id="X", cp_known=False, key_hash=None, authorization=None, scheme="wss", mode="enforce").accept
+    assert not ev(cp_id="X", cp_known=False, key_hash=None, authorization=None, scheme="ws", mode="enforce").accept
+    assert ev(cp_id="CP1", cp_known=True, key_hash=None, authorization=None, scheme="wss", mode="enforce",
+              cp_published=False).accept
+    # publikálatlan, de már van kulcsa: a jelszó kötelező
+    d = ev(cp_id="CP1", cp_known=True, key_hash=h, authorization=None, scheme="wss", mode="enforce",
+           cp_published=False)
+    assert not d.accept and d.http_status == 401
 
 
 def test_transport_scheme_from_proxy_headers():
@@ -354,9 +362,19 @@ async def test_ws_enforce_mode_rejects(monkeypatch):
         await handle_ocpp(ws, "WS-E")
         assert not ws.accepted and ws.denied == status, headers
 
-    ws = FakeWS(tls)
+    ws = FakeWS({})                                # ismeretlen töltő ws://-n: kizárva
     await handle_ocpp(ws, "NINCS-ILYEN")
     assert not ws.accepted and ws.denied == 403
+
+    await _cp("WS-PUBKEYLESS")                     # publikált, kulcs nélkül: kizárva
+    ws = FakeWS(tls)
+    await handle_ocpp(ws, "WS-PUBKEYLESS")
+    assert not ws.accepted and ws.denied == 401
+
+    await _cp("WS-NEW", published=False)           # új, publikálatlan töltő: jelszó nélkül is bejön
+    ws = FakeWS(tls)
+    await handle_ocpp(ws, "WS-NEW")
+    assert ws.accepted
 
     ws = FakeWS({**tls, "Authorization": _basic("WS-E", key)})
     await handle_ocpp(ws, "WS-E")

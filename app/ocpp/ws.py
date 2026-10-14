@@ -30,19 +30,20 @@ from app.services.load_balance import rebalance_for_cp
 logger = logging.getLogger("ocpp")
 
 
-async def _lookup_cp_auth(cp_id: str) -> tuple[bool, Optional[str]]:
-    """(ismert-e a töltő, tárolt kulcs-hash). Hibánál (DB) (False, None) – a döntést a mód adja."""
+async def _lookup_cp_auth(cp_id: str) -> tuple[bool, Optional[str], bool]:
+    """(ismert-e a töltő, tárolt kulcs-hash, publikált-e)."""
     from sqlalchemy import select
     import app.db.session as db_session
     from app.db.models import ChargePoint
 
     async with db_session.AsyncSessionLocal() as s:
         row = (await s.execute(
-            select(ChargePoint.id, ChargePoint.ocpp_auth_key_hash).where(ChargePoint.ocpp_id == cp_id)
+            select(ChargePoint.id, ChargePoint.ocpp_auth_key_hash, ChargePoint.is_published)
+            .where(ChargePoint.ocpp_id == cp_id)
         )).first()
     if row is None:
-        return False, None
-    return True, row[1]
+        return False, None, False
+    return True, row[1], bool(row[2])
 
 
 async def _record_auth(cp_id: str, result: Optional[str], scheme: str) -> None:
@@ -93,10 +94,10 @@ async def _admit(ws: WebSocket, cp_id: Optional[str]) -> Optional[bool]:
             await _record_auth(cp_id, None, scheme)
         return False
 
-    known, key_hash = (False, None)
+    known, key_hash, published = (False, None, True)
     if cp_id:
         try:
-            known, key_hash = await _lookup_cp_auth(cp_id)
+            known, key_hash, published = await _lookup_cp_auth(cp_id)
         except Exception:
             logger.exception(f"OCPP auth: töltő-lekérdezés sikertelen cp={cp_id}")
             if mode == "enforce":
@@ -108,10 +109,12 @@ async def _admit(ws: WebSocket, cp_id: Optional[str]) -> Optional[bool]:
         dec = await asyncio.to_thread(
             ocpp_auth.evaluate, cp_id=cp_id, cp_known=known, key_hash=key_hash,
             authorization=ws.headers.get("authorization"), scheme=scheme, mode=mode,
+            cp_published=published,
         )
     else:
         dec = ocpp_auth.evaluate(cp_id=cp_id, cp_known=known, key_hash=None,
-                                 authorization=ws.headers.get("authorization"), scheme=scheme, mode=mode)
+                                 authorization=ws.headers.get("authorization"), scheme=scheme, mode=mode,
+                                 cp_published=published)
 
     if dec.result == "ok":
         logger.info(f"OCPP auth OK: cp={cp_id} scheme={scheme}")
