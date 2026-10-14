@@ -22,7 +22,7 @@ szerver localhostján van kint (`127.0.0.1:8010`), publikusan kizárólag a tunn
 ## 2. Mi változott a backendben (élesítve `log` módban)
 
 - **Töltőnkénti kulcs** (`charge_points.ocpp_auth_key_hash`): a kulcsot a backend generálja
-  (40 hex karakter = 20 véletlen bájt), a DB-ben csak PBKDF2-SHA256 hash van.
+  (32 hex karakter = 16 véletlen bájt), a DB-ben csak PBKDF2-SHA256 hash van.
 - **Basic Auth ellenőrzés a kézfogáskor**: felhasználónév = ocpp_id, jelszó = a kulcs. Mivel a
   1.6-os whitepaper a kulcsot hex-ben adja meg, és a töltők egy része a hex szöveget, más része a
   dekódolt 20 bájtot küldi jelszóként, **mindkét alakot elfogadjuk**.
@@ -109,7 +109,11 @@ lehet férni. Egyszerre **egy** töltő; a következőre csak az előző igazol�
   `SecurityProfile` kulcs, a Basic Auth-hoz annak értéke `2` kell legyen (TLS + Basic) – **a kulcs
   és az URL beállítása után**, mert a 2-es profil wss-t vár. Ha nincs ilyen kulcs, a firmware
   valószínűleg a nem üres `AuthorizationKey` alapján dönt; a Voltie supporttól érdemes megkérdezni.
-- Kulcs-formátum: 40 hex karakter (20 bájt) – a whitepaper 16–20 bájtos ajánlásán belül, és csak
+- **Igazolva (2026-10-14, nadudvar_spar_2):** a Voltie a 40 hex karakteres kulcsot `Rejected`-del
+  elutasítja, a 32 hex karakterest (16 bájt) elfogadja. A kulcs beállítása nem bontja a kapcsolatot;
+  Soft reset után a töltő Basic Auth-tal jön vissza (`OCPP auth OK`, wss), a hex szöveget küldi jelszóként.
+  Külön `SecurityProfile` kulcs nincs: a nem üres `AuthorizationKey` kapcsolja be a Basic Auth-ot.
+- Kulcs-formátum: 32 hex karakter (16 bájt) – a whitepaper 16–20 bájtos ajánlásán belül, és csak
   `[0-9a-f]` karaktert tartalmaz, ami minden értelmezésben (hex / ASCII) biztonságos.
 
 ## 5. Ajánlott töltő-beállítások (jóváhagyásra – NEM módosítottuk)

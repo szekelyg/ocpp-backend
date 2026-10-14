@@ -228,7 +228,7 @@ async def test_rate_limit_per_cf_ip(client, monkeypatch):
 
 def test_key_hash_and_both_password_forms():
     key = ocpp_auth.generate_key()
-    assert len(key) == 40 and int(key, 16) >= 0
+    assert len(key) == 32 and int(key, 16) >= 0
     h = ocpp_auth.hash_key(key)
     assert key not in h
     assert ocpp_auth.verify_password(key.encode(), h)

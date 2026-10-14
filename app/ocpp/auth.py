@@ -2,7 +2,7 @@
 """OCPP 1.6 Security Profile 2: TLS + HTTP Basic Auth töltőnként.
 
 - Felhasználónév = a töltő azonosítója (chargePointId, nálunk az URL-ben lévő ocpp_id).
-- Jelszó = a töltő AuthorizationKey-e. A kulcsot a backend generálja (40 hex karakter = 20 bájt),
+- Jelszó = a töltő AuthorizationKey-e. A kulcsot a backend generálja (32 hex karakter = 16 bájt),
   a DB-ben csak a PBKDF2-SHA256 hash-e van (charge_points.ocpp_auth_key_hash).
 - Mód: OCPP_AUTH_MODE = off | log | enforce (alap: log)
     off     – semmit nem ellenőrzünk (a régi viselkedés), csak a sémát naplózzuk;
@@ -37,7 +37,8 @@ AuthMode = Literal["off", "log", "enforce"]
 AuthResult = Literal["ok", "missing", "wrong", "no_key", "unknown_cp"]
 
 _PBKDF2_ITER = 120_000
-KEY_BYTES = 20  # 40 hex karakter – az OCPP 1.6 AuthorizationKey 16..20 bájtos ajánlásán belül
+KEY_BYTES = 16  # 32 hex karakter – a Voltie PRO (fw 1.3.54-3.75) a 40 hex karakterest Rejected-del
+#                  elutasítja, a 32-est elfogadja (2026-10-14, nadudvar_spar_2); a whitepaper 16..20 bájtján belül
 
 
 def auth_mode() -> AuthMode:
@@ -53,7 +54,7 @@ def auth_mode() -> AuthMode:
 # ---------------------------------------------------------------------------
 
 def generate_key() -> str:
-    """Új AuthorizationKey: 40 kisbetűs hex karakter (20 véletlen bájt)."""
+    """Új AuthorizationKey: 32 kisbetűs hex karakter (16 véletlen bájt)."""
     return secrets.token_hex(KEY_BYTES)
 
 
