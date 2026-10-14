@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import StatusBadge from "../ui/StatusBadge";
-import { placeLines, timeAgo } from "../../utils/format";
+import { placeLines } from "../../utils/format";
 import { isPowerLimited, TYPE2_NOMINAL_KW } from "../../utils/power";
 import PayModal from "../ui/PayModal";
 import AccountLogin from "../ui/AccountLogin";
@@ -237,14 +237,11 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="font-semibold text-ink leading-tight">
-              {lines[0] || cp.ocpp_id || "—"}
+              {lines[0] || "—"}
             </div>
             {lines[1] && (
               <div className="text-sm text-ink-soft mt-0.5">{lines[1]}</div>
             )}
-            <div className="text-xs text-ink-muted mt-1">
-              Aktív: {timeAgo(cp.last_seen_at)}
-            </div>
           </div>
           <StatusBadge status={cp.status} />
         </div>
@@ -280,7 +277,7 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
       )}
 
       {/* Közös betáplálás (terheléselosztás): a szomszédos töltővel osztozik az áramon. */}
-      {cp.load_sharing && <LoadSharingHint ls={cp.load_sharing} />}
+      {cp.shared_supply && <LoadSharingHint />}
 
       {/* Állapot tájékoztató */}
       {statusStr === "available" && (
@@ -361,8 +358,8 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
 
         {/* Teljesítmény a fizetés ELŐTT – korlátozott állomásnál ez a legfontosabb
             információ, amit a vezető a töltő címkéjéről nem tud meg. */}
-        {cp.load_sharing && <LoadSharingHint ls={cp.load_sharing} className="mt-3" />}
-        {cp.max_power_kw > 0 && !cp.load_sharing && (
+        {cp.shared_supply && <LoadSharingHint className="mt-3" />}
+        {cp.max_power_kw > 0 && !cp.shared_supply && (
           isPowerLimited(cp) ? (
             <div className="mt-3 hint">
               Ez az állomás <span className="font-bold">{cp.max_power_kw} kW</span>-ra van
@@ -655,24 +652,11 @@ export default function SelectedChargerCard({ cp, onModalChange, autoOpenModal, 
  * címkéje alapján 22 kW-ra számítana, ezért fizetés előtt is elmondjuk, hogy ha a
  * szomszédos töltő is használatban van, a teljesítmény megoszlik. A díj nem függ ettől.
  */
-function LoadSharingHint({ ls, className = "" }) {
-  const others = Math.max(1, (ls.members || 2) - 1);
-  const busyNow = ls.shared_now && ls.current_limit_kw != null && ls.current_limit_kw < ls.group_max_kw;
+function LoadSharingHint({ className = "" }) {
   return (
     <div className={`hint ${className}`}>
-      {busyNow ? (
-        <>
-          A szomszédos töltő most használatban van, ezért itt a töltés{" "}
-          <span className="font-bold">legfeljebb {ls.current_limit_kw} kW</span>-tal indul;
-          amint a másik töltés véget ér, magától {ls.group_max_kw} kW-ra áll.
-        </>
-      ) : (
-        <>
-          Ez az állomás közös betáplálásról működik {others === 1 ? "a szomszédos töltővel" : `${others} másik töltővel`}:
-          egyedül <span className="font-bold">{ls.group_max_kw} kW</span>, egyidejű töltésnél
-          töltőnként <span className="font-bold">{ls.shared_kw} kW</span>. Az átállás automatikus.
-        </>
-      )}{" "}
+      Ez az állomás közös betáplálásról működik a szomszédos töltő(k)kel: ha azok is használatban
+      vannak, a teljesítmény megoszlik, és amint a másik töltés véget ér, magától visszaáll.
       A díj ettől nem változik: csak a felhasznált energiát fizeti.
     </div>
   );

@@ -1,5 +1,5 @@
 import StatusBadge from "../ui/StatusBadge";
-import { placeLines, timeAgo } from "../../utils/format";
+import { placeLines } from "../../utils/format";
 import { isPowerLimited } from "../../utils/power";
 
 export default function ChargerListItem({ cp, selected, onClick }) {
@@ -13,7 +13,7 @@ export default function ChargerListItem({ cp, selected, onClick }) {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="text-sm font-semibold text-ink leading-tight">
-          {lines[0] || cp.ocpp_id || "—"}
+          {lines[0] || "—"}
         </div>
         <StatusBadge status={cp.status} />
       </div>
@@ -30,9 +30,9 @@ export default function ChargerListItem({ cp, selected, onClick }) {
               max. {cp.max_power_kw} kW
             </span>
           )}
-          {cp.load_sharing && (
+          {cp.shared_supply && (
             <span className="chip" title="Közös betáplálás: egyidejű töltésnél a teljesítmény megoszlik">
-              közös betáplálás · együtt {cp.load_sharing.shared_kw} kW
+              közös betáplálás
             </span>
           )}
         </div>
@@ -45,7 +45,7 @@ export default function ChargerListItem({ cp, selected, onClick }) {
       )}
 
       <div className="mt-1.5 flex items-center justify-between gap-2">
-        <span className="text-xs text-ink-muted">Aktív: {timeAgo(cp.last_seen_at)}</span>
+        <span />
         {cp.latitude && cp.longitude && (
           <a
             href={`https://maps.google.com/?q=${cp.latitude},${cp.longitude}`}

@@ -22,6 +22,8 @@ from app.db.models import ChargePoint, ChargeSession
 from app.ocpp.time_utils import utcnow
 from tests.conftest import TestSession
 
+ADMIN_AUTH = {"Authorization": "Basic " + base64.b64encode(b"admin:test-admin-pw").decode()}
+
 
 def basic():
     return {"Authorization": "Basic " + base64.b64encode(b"admin:test-admin-pw").decode()}
@@ -296,28 +298,22 @@ async def test_public_charge_points_and_session_expose_sharing(client, fake):
         s.add(ChargePoint(ocpp_id="solo", status="available", last_seen_at=utcnow(), is_published=True))
         await s.commit()
 
+    # Publikus lista: csak a tény (shared_supply), csoport/korlát/élő állapot nem (2026-10-14).
     r = await client.get("/api/charge-points/")
     assert r.status_code == 200
-    by = {c["ocpp_id"]: c for c in r.json()}
-    assert by["solo"]["load_sharing"] is None
-    ls = by["var_1"]["load_sharing"]
-    assert ls["members"] == 2 and ls["group_max_kw"] == 22 and ls["shared_kw"] == 11
-    assert ls["current_limit_kw"] is None      # még nem futott kiosztás
+    async with TestSession() as s:
+        pid = dict((await s.execute(select(ChargePoint.ocpp_id, ChargePoint.public_id))).all())
+    by = {c["id"]: c for c in r.json()}
+    assert by[pid["solo"]]["shared_supply"] is False
+    assert by[pid["var_1"]]["shared_supply"] is True
+    for c in r.json():
+        assert "load_sharing" not in c and "load_group" not in c
 
-    # var_2 tölt → var_1 kártyáján: most 4 kW-ra korlátozva (6 A), shared_now
+    # A töltés oldalán (csak az indítónak / adminnak) továbbra is látszik az élő korlát.
     s2 = await _open_session(b_id, "TX2")
-    await lb.rebalance_group("var", "t")
-    r = await client.get(f"/api/charge-points/{a_id}")
-    ls = r.json()["load_sharing"]
-    assert ls["current_limit_kw"] == 4 and ls["shared_now"] is True
-    r = await client.get(f"/api/charge-points/{b_id}")
-    ls = r.json()["load_sharing"]
-    assert ls["current_limit_kw"] == 22 and ls["shared_now"] is False
-
-    # mindkettő tölt → a var_2 sessionje: power_limit 11 kW, shared_now
     s1 = await _open_session(a_id, "TX1")
     await lb.rebalance_group("var", "t")
-    r = await client.get(f"/api/sessions/{s2}")
+    r = await client.get(f"/api/sessions/{s2}", headers=ADMIN_AUTH)
     assert r.status_code == 200
     pl = r.json()["power_limit"]
     assert pl == {"limit_a": 16, "limit_kw": 11, "cap_kw": 22, "shared_now": True}
@@ -325,8 +321,8 @@ async def test_public_charge_points_and_session_expose_sharing(client, fake):
     # var_1 leáll → var_2 újra 22, nem osztott
     await _close_session(s1)
     await lb.rebalance_group("var", "t")
-    pl = (await client.get(f"/api/sessions/{s2}")).json()["power_limit"]
+    pl = (await client.get(f"/api/sessions/{s2}", headers=ADMIN_AUTH)).json()["power_limit"]
     assert pl["limit_kw"] == 22 and pl["shared_now"] is False
     # lezárt session: nincs power_limit
     await _close_session(s2)
-    assert "power_limit" not in (await client.get(f"/api/sessions/{s2}")).json()
+    assert "power_limit" not in (await client.get(f"/api/sessions/{s2}", headers=ADMIN_AUTH)).json()

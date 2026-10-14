@@ -70,7 +70,12 @@ export default function ChargingPage() {
 
   const fetchSession = useCallback(async () => {
     try {
-      const res = await fetch(`/api/sessions/${sessionId}`);
+      // A session-nézet csak az indítónak jár: intent-token (fejlécben, nem URL-ben),
+      // tartalékként a belépett fiók Bearer tokenje.
+      const tok = intentTokenFor(sessionId);
+      const headers = { ...(await authHeaders()), ...(tok ? { "X-Intent-Token": tok } : {}) };
+      const res = await fetch(`/api/sessions/${sessionId}`, { headers });
+      if (res.status === 403) throw new Error("Ezt a töltést csak az indítója nézheti meg. Nyissa meg a fizetés után kapott oldalt vagy az e-mailben küldött linket, illetve lépjen be az Energiafelhő-fiókjával.");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setSession(await res.json());
       setFetchErr("");
@@ -187,8 +192,7 @@ export default function ChargingPage() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Töltés</h1>
             <p className="text-sm text-ink-soft mt-0.5">
-              {cp?.ocpp_id || "—"}
-              {cp?.model ? ` · ${cp.model}` : ""}
+              {cp?.name || "—"}
             </p>
           </div>
           {cp?.status && <StatusBadge status={cp.status} />}

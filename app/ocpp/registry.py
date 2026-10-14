@@ -13,6 +13,9 @@ logger = logging.getLogger("ocpp")
 # cp_id -> websocket
 _ACTIVE_WS: Dict[str, WebSocket] = {}
 
+# cp_id -> az aktív kapcsolat Basic Auth-tal azonosította-e magát (OCPP Security Profile 2)
+_WS_AUTH: Dict[str, bool] = {}
+
 # cp_id -> counter (uniqueId generálás)
 _CP_MSG_COUNTER: Dict[str, int] = {}
 
@@ -22,15 +25,41 @@ _PENDING_CALLS: Dict[Tuple[str, str], asyncio.Future] = {}
 _REGISTRY_LOCK = asyncio.Lock()
 
 
-async def register_ws(cp_id: str, ws: WebSocket) -> None:
+async def register_ws(cp_id: str, ws: WebSocket, authenticated: bool = False) -> None:
     async with _REGISTRY_LOCK:
         _ACTIVE_WS[cp_id] = ws
+        _WS_AUTH[cp_id] = bool(authenticated)
+
+
+async def admit_ws(cp_id: str, ws: WebSocket, authenticated: bool) -> Tuple[bool, Optional[WebSocket]]:
+    """Második, egyidejű kapcsolat ugyanarra az ocpp_id-ra – szabály (docs/OCPP-HITELESITES.md):
+
+    - ha a meglévő kapcsolat hitelesített, az új pedig nem → az újat elutasítjuk
+      (egy jelszó nélküli imposztor nem rúghatja le a valódi töltőt);
+    - minden más esetben az új kapcsolat nyer (a töltő hálózati kiesés után újracsatlakozik,
+      a régi kapcsolat ilyenkor jellemzően már halott), a régit a hívó lezárja.
+
+    Visszaad: (beengedve?, lezárandó régi kapcsolat vagy None).
+    """
+    async with _REGISTRY_LOCK:
+        old = _ACTIVE_WS.get(cp_id)
+        if old is not None and old is not ws and _WS_AUTH.get(cp_id) and not authenticated:
+            return False, None
+        _ACTIVE_WS[cp_id] = ws
+        _WS_AUTH[cp_id] = bool(authenticated)
+        return True, (old if old is not ws else None)
+
+
+async def is_ws_authenticated(cp_id: str) -> bool:
+    async with _REGISTRY_LOCK:
+        return bool(_WS_AUTH.get(cp_id))
 
 
 async def unregister_ws_if_same(cp_id: str, ws: WebSocket) -> None:
     async with _REGISTRY_LOCK:
         if _ACTIVE_WS.get(cp_id) is ws:
             _ACTIVE_WS.pop(cp_id, None)
+            _WS_AUTH.pop(cp_id, None)
 
 
 async def get_ws(cp_id: str) -> Optional[WebSocket]:

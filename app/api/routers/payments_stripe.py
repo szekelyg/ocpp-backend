@@ -347,15 +347,21 @@ async def stripe_webhook(
             intent.stripe_payment_intent_id = str(stripe_pi_id)
         intent.updated_at = utcnow()
 
-        # Expired intentet nem indítunk
+        # Expired intentet nem indítunk – és a zárolást AZONNAL feloldjuk (B1): ehhez az
+        # intenthez nem lesz session, így semmi más nem engedné el az ügyfél pénzét.
         now = utcnow()
-        if intent.expires_at and intent.expires_at < now:
-            logger.warning(f"Intent expired: intent_id={intent.id} expires_at={intent.expires_at}")
-            # itt később: refund flow
-            intent.status = "expired"
-            intent.updated_at = now
-            await db.commit()
-            return {"ok": True}
+        expires_at = intent.expires_at
+        if expires_at is not None and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=now.tzinfo)
+        if expires_at and expires_at < now:
+            logger.warning(f"Intent expired: intent_id={intent.id} expires_at={intent.expires_at} – zárolás feloldása")
+            existing = await _get_existing_session_for_intent(db, intent.id)
+            if existing is None:
+                await _release_hold(intent, reason="intent_expired")
+                intent.status = "expired"
+                intent.updated_at = now
+                await db.commit()
+                return {"ok": True, "handled": "expired_released"}
 
         # "Adataim mentése" – a számlázási profil CSAK sikeres fizetés után kerül a users
         # táblába (a POST /api/intents/ hitelesítés nélküli, ott nem írunk usert).

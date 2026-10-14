@@ -83,7 +83,7 @@ export default function Home() {
       const status = (cp.status || "").toString().trim().toLowerCase();
       const matchStatus = statusFilter === "all" ? true : status === statusFilter;
 
-      const hay = `${cp.ocpp_id || ""} ${cp.location_name || ""} ${cp.address_text || ""}`.toLowerCase();
+      const hay = `${cp.location_name || ""} ${cp.address_text || ""}`.toLowerCase();
       const matchQuery = q ? hay.includes(q) : true;
 
       return matchStatus && matchQuery;
@@ -116,11 +116,24 @@ export default function Home() {
     }
   }, [filtered, expandedId, selectedId]);
 
-  // ?cp=<id> – töltő előválasztás és modal auto-nyitás (csak startolható státusznál)
+  // ?cp=<id> – töltő előválasztás és modal auto-nyitás (csak startolható státusznál).
+  // Az id a publikus (UUID) azonosító; a régi QR-kódok/linkek sorszámos id-ját vagy
+  // töltő-azonosítóját a backend /api/charge-points/{ref} oldja fel publikus id-ra.
+  const [cpResolved, setCpResolved] = useState(null);
   useEffect(() => {
-    if (!cpParam || !items.length || autoOpenDoneRef.current) return;
-    const cpId = parseInt(cpParam, 10);
-    const match = items.find((x) => x.id === cpId);
+    if (!cpParam || !items.length || cpResolved !== null) return;
+    if (items.some((x) => x.id === cpParam)) { setCpResolved(cpParam); return; }
+    let cancelled = false;
+    fetch(`/api/charge-points/${encodeURIComponent(cpParam)}`, { headers: { Accept: "application/json" } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled) setCpResolved(d?.id || ""); })
+      .catch(() => { if (!cancelled) setCpResolved(""); });
+    return () => { cancelled = true; };
+  }, [cpParam, items, cpResolved]);
+
+  useEffect(() => {
+    if (!cpResolved || !items.length || autoOpenDoneRef.current) return;
+    const match = items.find((x) => x.id === cpResolved);
     if (!match) return;
     autoOpenDoneRef.current = true;
     setSelectedId(match.id);
@@ -129,7 +142,7 @@ export default function Home() {
     if (startable.has(String(match.status || "").toLowerCase())) {
       setAutoOpenModal(true);
     }
-  }, [cpParam, items]);
+  }, [cpResolved, items]);
 
   const handleToggle = useCallback((id) => {
     setSelectedId(id);

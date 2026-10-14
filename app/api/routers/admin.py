@@ -1,4 +1,5 @@
 # app/api/routers/admin.py
+import asyncio
 import base64
 import logging
 import os
@@ -152,6 +153,7 @@ def _session_dict(s: ChargeSession) -> dict:
         "invoice_number": s.invoice_number,
         "meter_start_wh": s.meter_start_wh,
         "meter_stop_wh": s.meter_stop_wh,
+        "stop_reason": s.stop_reason,
         "intent": {
             "id": intent.id,
             "status": intent.status,
@@ -227,6 +229,7 @@ def _cp_dict_admin(cp: ChargePoint) -> dict:
     return {
         "id": cp.id,
         "ocpp_id": cp.ocpp_id,
+        "public_id": cp.public_id,
         "is_published": bool(cp.is_published),
         "location_id": cp.location_id,
         "missing_fields": missing,
@@ -249,6 +252,14 @@ def _cp_dict_admin(cp: ChargePoint) -> dict:
         "latitude": float(cp.location.latitude) if cp.location and cp.location.latitude is not None else None,
         "longitude": float(cp.location.longitude) if cp.location and cp.location.longitude is not None else None,
         "created_at": cp.created_at.isoformat() if cp.created_at else None,
+        # OCPP hitelesítés (Security Profile 2) állapota – lásd docs/OCPP-HITELESITES.md
+        "ocpp_auth": {
+            "key_set": bool(cp.ocpp_auth_key_hash),
+            "key_set_at": cp.ocpp_auth_key_set_at.isoformat() if cp.ocpp_auth_key_set_at else None,
+            "last_result": cp.ocpp_auth_last_result,
+            "last_at": cp.ocpp_auth_last_at.isoformat() if cp.ocpp_auth_last_at else None,
+            "last_scheme": cp.ocpp_last_scheme,
+        },
     }
 
 
@@ -621,6 +632,180 @@ async def admin_get_cp_config(
         raise HTTPException(status_code=502, detail={"error": "ocpp_failed", "reason": str(e)})
 
 
+# ── Töltő-konfiguráció módosítása (szűk allowlist) ──────────────────────────────
+#
+# A korábbi, hitelesítés nélküli change-config végpont megszűnt; ez az admin-only utód, de
+# CSAK engedélyezett kulcsokra. Most: az áramkorlát-kulcsok (egész amper, 6..CurrentLimitHardware,
+# a töltőből visszaolvasva). A hitelesítési bevezetés kulcsai (OCPPBackendJSONURL,
+# AuthorizationKey, offline-kulcsok) szándékosan NEM szerepelnek – azok külön, jóváhagyott
+# lépések (docs/OCPP-HITELESITES.md).
+
+CONFIG_CURRENT_LIMIT_KEYS = frozenset({"CurrentLimitUser", "CurrentLimitDefault"})
+_MIN_CURRENT_A = 6   # IEC 61851: 6 A alatt nem tölt
+
+
+class AdminConfigChangeIn(BaseModel):
+    key: str
+    value: str
+
+
+def _cfg_map(res: dict) -> dict:
+    return {k.get("key"): k.get("value") for k in (res or {}).get("configurationKey", []) if isinstance(k, dict)}
+
+
+@router.post("/charge-points/{cp_id}/config")
+async def admin_change_cp_config(
+    cp_id: int,
+    body: AdminConfigChangeIn,
+    db: AsyncSession = Depends(get_db),
+    who: AdminPrincipal = Depends(verify_admin),
+):
+    """ChangeConfiguration egy engedélyezett kulcsra; régi→új érték naplózva, a töltő válaszával."""
+    from app.ocpp.registry import change_configuration, send_call_and_wait
+
+    key = (body.key or "").strip()
+    if key not in CONFIG_CURRENT_LIMIT_KEYS:
+        raise HTTPException(status_code=400, detail={
+            "error": "key_not_allowed", "allowed": sorted(CONFIG_CURRENT_LIMIT_KEYS)})
+    raw = (body.value or "").strip()
+    if not raw.isdigit():
+        raise HTTPException(status_code=422, detail={"error": "value_must_be_integer_amps"})
+    value = int(raw)
+
+    cp = (await db.execute(select(ChargePoint).where(ChargePoint.id == cp_id))).scalar_one_or_none()
+    if not cp:
+        raise HTTPException(status_code=404, detail="ChargePoint not found")
+
+    try:
+        before = _cfg_map(await send_call_and_wait(
+            cp.ocpp_id, "GetConfiguration", {"key": ["CurrentLimitHardware", key]}, timeout_s=15))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail={"error": "ocpp_failed", "reason": str(e)})
+    hw_raw = str(before.get("CurrentLimitHardware") or "").strip()
+    if not hw_raw.isdigit():
+        # Nem tudjuk a hardveres plafont → nem írunk (fail-safe)
+        raise HTTPException(status_code=409, detail={"error": "hardware_limit_unknown", "read": before})
+    hw = int(hw_raw)
+    if not (_MIN_CURRENT_A <= value <= hw):
+        raise HTTPException(status_code=422, detail={
+            "error": "value_out_of_range", "min": _MIN_CURRENT_A, "max": hw})
+    old = before.get(key)
+
+    try:
+        res = await change_configuration(cp.ocpp_id, key, str(value))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail={"error": "ocpp_failed", "reason": str(e)})
+    status_ = (res or {}).get("status", "Unknown")
+    logger.warning(
+        "admin_change_cp_config cp=%s key=%s %s -> %s status=%s by=%s",
+        cp.ocpp_id, key, old, value, status_, who.label,
+    )
+    return {
+        "ok": status_ in ("Accepted", "RebootRequired"),
+        "ocpp_id": cp.ocpp_id, "key": key, "old": old, "new": str(value),
+        "hardware_limit": hw, "status": status_, "ocpp": res,
+    }
+
+
+# ── OCPP hitelesítés (Security Profile 2: TLS + Basic Auth) ─────────────────────
+#
+# Kulcs-generálás töltőnként: a kulcsot EGYSZER adjuk vissza (a DB-ben csak a hash marad), a
+# hozzá tartozó ChangeConfiguration(AuthorizationKey) parancsot pedig csak ELŐÁLLÍTJUK – nem
+# küldjük el. A töltőre küldés (apply) külön végpont, ami alapból ki van kapcsolva
+# (OCPP_AUTH_APPLY_ENABLED), mert éles töltő konfigurációját csak jóváhagyással változtatjuk.
+# Bevezetési terv: docs/OCPP-HITELESITES.md
+
+
+class OcppKeyApplyIn(BaseModel):
+    key: str
+
+
+def _apply_enabled() -> bool:
+    return (os.environ.get("OCPP_AUTH_APPLY_ENABLED") or "").strip().lower() in ("1", "true", "yes")
+
+
+@router.post("/charge-points/{cp_id}/ocpp-auth-key")
+async def admin_generate_ocpp_auth_key(
+    cp_id: int,
+    db: AsyncSession = Depends(get_db),
+    who: AdminPrincipal = Depends(verify_admin),
+):
+    """Új AuthorizationKey a töltőnek. A kulcs csak ebben a válaszban látszik; a töltőre NEM megy ki."""
+    from app.ocpp import auth as ocpp_auth
+
+    cp = (await db.execute(select(ChargePoint).where(ChargePoint.id == cp_id))).scalar_one_or_none()
+    if not cp:
+        raise HTTPException(status_code=404, detail="ChargePoint not found")
+    key = ocpp_auth.generate_key()
+    cp.ocpp_auth_key_hash = await asyncio.to_thread(ocpp_auth.hash_key, key)
+    cp.ocpp_auth_key_set_at = _utcnow()
+    await db.commit()
+    logger.warning("admin_generate_ocpp_auth_key cp=%s by=%s (a kulcs nem került naplóba)", cp.ocpp_id, who.label)
+    payload = ocpp_auth.change_configuration_payload(key)
+    return {
+        "ok": True,
+        "ocpp_id": cp.ocpp_id,
+        "key": key,
+        "basic_auth_username": cp.ocpp_id,
+        "change_configuration": payload,
+        "ocpp_frame_example": [2, "<uniqueId>", "ChangeConfiguration", payload],
+        "sent_to_charger": False,
+        "mode": ocpp_auth.auth_mode(),
+        "note": "A kulcsot most mentse el – később nem kérhető le. A töltőre küldés külön lépés "
+                "(docs/OCPP-HITELESITES.md); log módban a töltő kulcs nélkül is kapcsolódhat.",
+    }
+
+
+@router.delete("/charge-points/{cp_id}/ocpp-auth-key")
+async def admin_clear_ocpp_auth_key(
+    cp_id: int,
+    db: AsyncSession = Depends(get_db),
+    who: AdminPrincipal = Depends(verify_admin),
+):
+    """Visszaállítás: a töltő kulcs-hash-ének törlése (log módban utána „no_key")."""
+    cp = (await db.execute(select(ChargePoint).where(ChargePoint.id == cp_id))).scalar_one_or_none()
+    if not cp:
+        raise HTTPException(status_code=404, detail="ChargePoint not found")
+    cp.ocpp_auth_key_hash = None
+    cp.ocpp_auth_key_set_at = None
+    await db.commit()
+    logger.warning("admin_clear_ocpp_auth_key cp=%s by=%s", cp.ocpp_id, who.label)
+    return {"ok": True, "ocpp_id": cp.ocpp_id}
+
+
+@router.post("/charge-points/{cp_id}/ocpp-auth-key/apply")
+async def admin_apply_ocpp_auth_key(
+    cp_id: int,
+    body: OcppKeyApplyIn,
+    db: AsyncSession = Depends(get_db),
+    who: AdminPrincipal = Depends(verify_admin),
+):
+    """ChangeConfiguration(AuthorizationKey) küldése a töltőnek – CSAK ha OCPP_AUTH_APPLY_ENABLED=true.
+
+    A kulcsnak egyeznie kell a tárolt hash-sel (elgépelés ellen: rossz kulccsal a töltő enforce
+    módban kizárná magát)."""
+    from app.ocpp import auth as ocpp_auth
+    from app.ocpp.registry import change_configuration
+
+    if not _apply_enabled():
+        raise HTTPException(status_code=403, detail={
+            "error": "apply_disabled",
+            "hint": "A töltő konfigurációjának módosítása jóváhagyáshoz kötött: OCPP_AUTH_APPLY_ENABLED=true kell hozzá.",
+        })
+    cp = (await db.execute(select(ChargePoint).where(ChargePoint.id == cp_id))).scalar_one_or_none()
+    if not cp:
+        raise HTTPException(status_code=404, detail="ChargePoint not found")
+    ok = await asyncio.to_thread(ocpp_auth.verify_password, body.key.strip().encode("utf-8"), cp.ocpp_auth_key_hash)
+    if not ok:
+        raise HTTPException(status_code=409, detail={"error": "key_mismatch"})
+    try:
+        res = await change_configuration(cp.ocpp_id, "AuthorizationKey", body.key.strip())
+    except Exception as e:
+        raise HTTPException(status_code=502, detail={"error": "ocpp_failed", "reason": str(e)})
+    logger.warning("admin_apply_ocpp_auth_key cp=%s by=%s result=%s", cp.ocpp_id, who.label, res)
+    return {"ok": (res or {}).get("status") == "Accepted", "ocpp": res}
+
+
 # ── Admin teszt-töltés (kedvezményes árazás, teljes Stripe-folyamat) ────────────
 
 # Admin teszt árazás – CSAK az így indított intentre érvényes (publikus árazás változatlan).
@@ -698,8 +883,10 @@ async def admin_test_charge(
             "connector_id": str(body.connector_id),
             "admin_test": "1",
         }
+        from app.api.routers.intents import checkout_expires_at
         checkout = _stripe.checkout.Session.create(
             mode="payment",
+            expires_at=checkout_expires_at(),
             success_url=f"{base_url}/pay/success?intent_id={intent.id}&t={issue_intent_token(intent.id)}",
             cancel_url=f"{base_url}/pay/cancel?intent_id={intent.id}",
             customer_email=email,

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import datetime, timezone, timedelta
 
 import stripe
-from typing import Optional
+from typing import Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, EmailStr
@@ -13,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import Identity, get_db, get_optional_identity
-from app.api.routers.charge_points import compute_status
+from app.api.routers.charge_points import compute_status, resolve_public_charge_point
 from app.db.models import ChargePoint, ChargingIntent, User
 from app.services.auth_tokens import issue_intent_token
 
@@ -38,6 +39,14 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# Stripe: a Checkout Session expires_at 30 perc és 24 óra között lehet (a létrehozástól).
+CHECKOUT_MIN_LIFETIME_S = 30 * 60 + 60
+
+
+def checkout_expires_at() -> int:
+    return int(time.time()) + CHECKOUT_MIN_LIFETIME_S
+
+
 def _get_env(name: str) -> str:
     v = os.environ.get(name)
     if not v:
@@ -46,7 +55,9 @@ def _get_env(name: str) -> str:
 
 
 class CreateIntentIn(BaseModel):
-    charge_point_id: int = Field(..., ge=1)
+    # A publikus töltő-id (public_id, UUID). Régi, még nyitott böngészőfülek / QR-linkek miatt
+    # a sorszámos id és az ocpp_id is elfogadott (resolve_public_charge_point).
+    charge_point_id: Union[int, str]
     connector_id: int = Field(1, ge=0)  # 0 is lehet (szimulátor)
     # Vendégnek kötelező. Bejelentkezve (Bearer: e-mail-token vagy Keycloak) a fiók e-mailje
     # számít, a body-beli értéket figyelmen kívül hagyjuk – a session így a fiókhoz kötődik.
@@ -125,17 +136,12 @@ async def create_intent(
     billing = await _billing_from_body_or_profile(body, ident, db)
 
     # 1) CP ellenőrzés
-    cp = (
-        (await db.execute(select(ChargePoint).where(ChargePoint.id == body.charge_point_id)))
-        .scalar_one_or_none()
-    )
-    if not cp:
-        raise HTTPException(status_code=404, detail="ChargePoint not found")
-
-    # Konfigurálásra váró (publikálatlan) töltőn nem indítható publikus fizetés.
+    # Konfigurálásra váró (publikálatlan) töltőn nem indítható publikus fizetés – a
+    # resolve_public_charge_point csak publikáltat ad vissza.
     # Az admin teszt-töltés (/api/admin/charge-points/{id}/test-charge) szándékosan
     # kihagyja ezt az ellenőrzést: publikálás előtt kell tudni tesztelni.
-    if not cp.is_published:
+    cp = await resolve_public_charge_point(db, str(body.charge_point_id))
+    if not cp:
         raise HTTPException(status_code=404, detail="ChargePoint not found")
 
     # "available"  → autó még nincs bedugva, RemoteStart után a CP Preparing-be megy és vár
@@ -222,6 +228,10 @@ async def create_intent(
 
         params = {
             "mode": "payment",
+            # A Checkout se éljen sokkal tovább a 15 perces intentnél (B1): a Stripe minimuma
+            # 30 perc. Ami ezen belül, de az intent lejárta után fizet, annak a webhook azonnal
+            # feloldja a zárolását (payments_stripe: expired ág → _release_hold).
+            "expires_at": checkout_expires_at(),
             "success_url": f"{base_url}/pay/success?intent_id={intent.id}&t={intent_token}",
             "cancel_url": f"{base_url}/pay/cancel?intent_id={intent.id}",
             "customer_email": email,

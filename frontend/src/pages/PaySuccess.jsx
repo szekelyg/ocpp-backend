@@ -26,7 +26,14 @@ export default function PaySuccess() {
 
     async function poll() {
       try {
-        const res = await fetch(`/api/sessions/by-intent/${intentId}`);
+        const res = await fetch(`/api/sessions/by-intent/${intentId}`, {
+          headers: intentToken ? { "X-Intent-Token": intentToken } : {},
+        });
+        if (res.status === 410) {
+          // Lejárt / visszavont fizetés: a zárolást a backend feloldotta, session nem lesz.
+          setPhase("expired");
+          return;
+        }
         if (res.ok) {
           const data = await res.json();
           const q = intentToken ? `?t=${encodeURIComponent(intentToken)}` : "";
@@ -59,6 +66,25 @@ export default function PaySuccess() {
             <div className="text-3xl">⚠️</div>
             <div className="text-lg font-semibold text-rose-600">Érvénytelen hivatkozás</div>
             <p className="text-ink-soft text-sm">A link nem tartalmaz érvényes azonosítót.</p>
+            <a href="/" className="btn btnPrimary inline-flex">← Vissza a töltőkhöz</a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === "expired") {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <AppHeader />
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="max-w-md w-full card cardBody text-center space-y-4">
+            <div className="text-3xl">⏱️</div>
+            <div className="text-lg font-semibold text-brand-amber">A töltés nem indult el</div>
+            <p className="text-ink-soft text-sm">
+              A fizetés túl későn érkezett meg (a foglalás 15 percig érvényes), vagy a töltő
+              időközben foglalt lett. A kártyáján zárolt összeget feloldottuk — nem terheltük meg.
+            </p>
             <a href="/" className="btn btnPrimary inline-flex">← Vissza a töltőkhöz</a>
           </div>
         </div>

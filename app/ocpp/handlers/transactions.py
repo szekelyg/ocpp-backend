@@ -190,6 +190,11 @@ async def stop_transaction(cp_id: str, payload: dict) -> None:
 
             cs.finished_at = ts
             cs.meter_stop_wh = meter_stop
+            # OCPP 1.6: a "reason" opcionális; hiányában a spec szerint "Local" értendő,
+            # de mi csak azt tároljuk, amit a töltő ténylegesen küldött (NULL = nem küldte).
+            reason = payload.get("reason")
+            if isinstance(reason, str) and reason.strip():
+                cs.stop_reason = reason.strip()[:32]
 
             # 1) preferált: meterStart/meterStop
             _recalc_energy_and_cost(cs, cs.intent)

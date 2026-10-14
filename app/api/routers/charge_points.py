@@ -1,5 +1,6 @@
 import os
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,14 +49,16 @@ def compute_status(cp: ChargePoint) -> str:
 
 
 def _cp_dict(cp: ChargePoint) -> dict:
+    """PUBLIKUS töltő-adat: csak ami a térképhez/indításhoz kell.
+
+    Szándékosan NINCS benne: ocpp_id (a töltő OCPP-azonosítója), a sorszámos DB-id,
+    last_seen_at, gyártó/típus, terheléselosztás részletei. Az "id" a stabil, pszeudonim
+    public_id (UUID) – ezt viszi a QR (?cp=…) és az intent-indítás is.
+    """
     price = _price_per_kwh()
     return {
-        "id": cp.id,
-        "ocpp_id": cp.ocpp_id,
-        "model": cp.model,
-        "vendor": cp.vendor,
+        "id": cp.public_id,
         "status": compute_status(cp),
-        "last_seen_at": cp.last_seen_at.isoformat() if cp.last_seen_at else None,
         "location_name": cp.location.name if cp.location else None,
         "address_text": cp.location.address_text if cp.location else None,
         "latitude": float(cp.location.latitude) if cp.location and cp.location.latitude is not None else None,
@@ -64,35 +67,44 @@ def _cp_dict(cp: ChargePoint) -> dict:
         "max_power_kw": cp.max_power_kw,
         "price_huf_per_kwh": price,
         "min_charge_huf": _STRIPE_MIN_HUF,
+        # Csak a tény, hogy közös betáplálású (a vezető fizetés előtt tudja, hogy egyidejű
+        # töltésnél a teljesítmény megoszlik) – csoportnév, korlátok, élő állapot NEM.
+        "shared_supply": bool(cp.load_group),
     }
+
+
+def _published():
+    return select(ChargePoint).options(selectinload(ChargePoint.location)).where(ChargePoint.is_published.is_(True))
+
+
+async def resolve_public_charge_point(db: AsyncSession, ref: str) -> Optional[ChargePoint]:
+    """Publikált töltő keresése publikus hivatkozással.
+
+    Elfogadott: az új public_id (UUID); visszafelé-kompatibilitásként a régi QR-kódok/linkek
+    sorszámos id-ja vagy ocpp_id-ja is. Publikálatlan töltőt sosem ad vissza.
+    """
+    ref = (ref or "").strip()
+    if not ref or len(ref) > 64:
+        return None
+    cp = (await db.execute(_published().where(ChargePoint.public_id == ref))).scalar_one_or_none()
+    if cp is None and ref.isdigit():
+        cp = (await db.execute(_published().where(ChargePoint.id == int(ref)))).scalar_one_or_none()
+    if cp is None:
+        cp = (await db.execute(_published().where(ChargePoint.ocpp_id == ref))).scalar_one_or_none()
+    return cp
 
 
 @router.get("/", response_model=list[dict])
 async def list_charge_points(db: AsyncSession = Depends(get_db)):
-    """Csak publikált töltők – a konfigurálásra váró új töltők nem látszanak."""
-    result = await db.execute(
-        select(ChargePoint)
-        .options(selectinload(ChargePoint.location))
-        .where(ChargePoint.is_published.is_(True))
-    )
-    items = result.scalars().all()
-    from app.services.load_balance import public_sharing_info
-    sharing = await public_sharing_info(items)
-    return [{**_cp_dict(cp), "load_sharing": sharing.get(cp.id)} for cp in items]
+    """Csak publikált töltők – a konfigurálásra váró / belső teszt töltők nem látszanak."""
+    items = (await db.execute(_published())).scalars().all()
+    return [_cp_dict(cp) for cp in items]
 
 
-@router.get("/{cp_id}", response_model=dict)
-async def get_charge_point(cp_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(ChargePoint)
-        .options(selectinload(ChargePoint.location))
-        .where(and_(ChargePoint.id == cp_id, ChargePoint.is_published.is_(True)))
-    )
-    cp = result.scalar_one_or_none()
-
+@router.get("/{ref}", response_model=dict)
+async def get_charge_point(ref: str, db: AsyncSession = Depends(get_db)):
+    """Egy publikált töltő public_id (vagy régi QR: sorszámos id / ocpp_id) alapján."""
+    cp = await resolve_public_charge_point(db, ref)
     if not cp:
         raise HTTPException(status_code=404, detail="ChargePoint not found")
-
-    from app.services.load_balance import public_sharing_info
-    sharing = await public_sharing_info([cp])
-    return {**_cp_dict(cp), "load_sharing": sharing.get(cp.id)}
+    return _cp_dict(cp)

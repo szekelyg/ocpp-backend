@@ -257,7 +257,7 @@ export default function MapView({ points = [], onSelect, onStartFlow }) {
           >
             <Popup>
               <div className="space-y-2 text-sm">
-                <div className="font-semibold">{cp.location_name || cp.ocpp_id}</div>
+                <div className="font-semibold">{cp.location_name || "Töltő"}</div>
                 <StatusBadge status={cp.status} />
                 <div>{lines[0]}</div>
                 {lines[1] ? <div className="text-ink-muted">{lines[1]}</div> : null}

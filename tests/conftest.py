@@ -18,6 +18,8 @@ os.environ["OCPI_PARTY_ID"] = "ENF"
 os.environ["OCPI_BUSINESS_NAME"] = "Energiafelhő Kft."
 os.environ["OCPP_PRICE_HUF_PER_KWH"] = "170"
 os.environ["STRIPE_MIN_HUF"] = "500"
+os.environ["RATE_LIMIT_ENABLED"] = "0"   # a rate limitet a saját tesztje kapcsolja be
+os.environ["OCPP_AUTH_MODE"] = "log"
 
 import base64
 import pathlib

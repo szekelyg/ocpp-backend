@@ -59,8 +59,8 @@ ezért ott is bekerült a token a `success_url`-be.
 |---|---|---|---|
 | `GET /api/sessions/` | senki (admin a `/api/admin/sessions`-t használja) | **nincs** | **admin Basic** (`verify_admin`) |
 | `GET /api/sessions/active/by-charge-point/{cp_id}` | senki | **nincs** | **admin Basic** |
-| `GET /api/sessions/by-intent/{intent_id}` | PaySuccess (vendég) | nincs | változatlanul publikus (session-id + állapot; e-mailt nem ad vissza) – later: token-kötés |
-| `GET /api/sessions/{id}` | ChargingPage (vendég), polling 3 mp | nincs | változatlanul publikus (fogyasztás/ár/státusz, e-mail nélkül) – later: token-kötés |
+| `GET /api/sessions/by-intent/{intent_id}` | PaySuccess (vendég) | nincs | **2026-10-14: intent-token (`X-Intent-Token` fejléc vagy `?t=`) VAGY saját fiók Bearer VAGY admin; különben 403.** Lejárt/visszavont intentnél 410. |
+| `GET /api/sessions/{id}` | ChargingPage (vendég), polling 3 mp | nincs | **2026-10-14: ugyanígy; nem létező id is 403 (nincs pásztázás). Az ocpp_id/gyártó/típus nem megy ki.** |
 | `POST /api/sessions/{id}/stop` | ChargingPage (vendég), admin teszt-töltés | **nincs** | **intent-token a body-ban VAGY a session e-mailjéhez tartozó Bearer-token; különben 403** |
 | `POST /api/sessions/start` | senki (admin eszköz) | admin Basic | változatlan |
 | `POST /api/sessions/stop` | senki (admin eszköz) | admin Basic | változatlan |

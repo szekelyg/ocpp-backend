@@ -105,12 +105,30 @@ async def test_session_list_requires_admin(client):
 
 
 @pytest.mark.asyncio
-async def test_single_session_stays_public(client):
-    """A vendég-oldal (ChargingPage, PaySuccess) token nélkül pollozza a saját sessionjét."""
+async def test_single_session_requires_intent_token(client):
+    """2026-10-14-től a session-nézet sem publikus: intent-token (fejléc / ?t=) kell."""
     cp_id = await _seed_cp()
     sid, intent_id = await _seed_session(cp_id)
-    assert (await client.get(f"/api/sessions/{sid}")).status_code == 200
-    assert (await client.get(f"/api/sessions/by-intent/{intent_id}")).status_code == 200
+    _, other_intent = await _seed_session(cp_id, email="masik@example.hu", tx="TX-9")
+    tok = issue_intent_token(intent_id)
+
+    assert (await client.get(f"/api/sessions/{sid}")).status_code == 403
+    assert (await client.get(f"/api/sessions/by-intent/{intent_id}")).status_code == 403
+    # nem létező id ugyanazt a 403-at adja (nincs id-pásztázás)
+    assert (await client.get("/api/sessions/999999")).status_code == 403
+    # más intent tokenje nem jó
+    bad = {"X-Intent-Token": issue_intent_token(other_intent)}
+    assert (await client.get(f"/api/sessions/{sid}", headers=bad)).status_code == 403
+    assert (await client.get(f"/api/sessions/by-intent/{intent_id}", headers=bad)).status_code == 403
+
+    r = await client.get(f"/api/sessions/{sid}", headers={"X-Intent-Token": tok})
+    assert r.status_code == 200
+    assert (await client.get(f"/api/sessions/{sid}?t={tok}")).status_code == 200
+    r2 = await client.get(f"/api/sessions/by-intent/{intent_id}", headers={"X-Intent-Token": tok})
+    assert r2.status_code == 200 and r2.json()["id"] == sid
+    # nem ad ki ocpp_id-t / gyártót / típust
+    cp = r2.json().get("charge_point") or {}
+    assert "ocpp_id" not in cp and "model" not in cp and "vendor" not in cp
 
 
 # ── Stop: csak az indító ─────────────────────────────────────────────────────

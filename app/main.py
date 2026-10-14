@@ -20,6 +20,7 @@ from app.api.routers.auth import router as auth_router
 from app.api.routers.me import router as me_router
 from app.api.routers.integration import router as integration_router
 from app.core.cors import PathScopedCORS, portal_origins
+from app.core.rate_limit import RateLimitMiddleware
 from app.ocpi.router import router as ocpi_router
 from app.ocpi.errors import add_ocpi_exception_handlers
 from app.ocpp.ocpp_ws import handle_ocpp
@@ -294,7 +295,23 @@ async def lifespan(_app: FastAPI):
     logger.info("Background tasks stopped")
 
 
-app = FastAPI(title="OCPP Backend MVP", lifespan=lifespan)
+def _api_docs_enabled() -> bool:
+    """FastAPI automatikus dokumentáció (/docs, /redoc, /openapi.json) – élesben KI.
+
+    A teljes API-térkép (admin végpontok, paraméterek) nem publikus; fejlesztéshez
+    ENABLE_API_DOCS=1 kapcsolja be (pl. deploy/.env.dev).
+    """
+    return (os.environ.get("ENABLE_API_DOCS") or "").strip().lower() in ("1", "true", "yes")
+
+
+_DOCS = _api_docs_enabled()
+app = FastAPI(
+    title="OCPP Backend MVP",
+    lifespan=lifespan,
+    docs_url="/docs" if _DOCS else None,
+    redoc_url="/redoc" if _DOCS else None,
+    openapi_url="/openapi.json" if _DOCS else None,
+)
 
 # REST API routerek
 app.include_router(charge_points_router, prefix="/api")
@@ -317,6 +334,10 @@ app.add_middleware(
     allow_credentials=False,
     max_age=600,
 )
+
+# Rate limit a publikus végpontokon (app/core/rate_limit.py) – a legkülső réteg, hogy a
+# korlátozott kérés semmilyen munkát ne okozzon.
+app.add_middleware(RateLimitMiddleware)
 
 # OCPI 2.2.1 (CPO role) – own "/ocpi" prefix, sibling of "/api"
 app.include_router(ocpi_router)
@@ -366,6 +387,9 @@ async def spa_fallback(full_path: str):
     Egyedi statikus fájlokat (favicon, vite.svg stb.) közvetlenül szolgálunk ki.
     """
     if full_path.startswith(("api/", "ocpp", "ocpi", "test/")):
+        raise HTTPException(status_code=404, detail="Not Found")
+    # Kikapcsolt API-dokumentáció: valódi 404, ne az SPA index.html-je (200)
+    if full_path.rstrip("/") in ("docs", "redoc", "openapi.json", "docs/oauth2-redirect"):
         raise HTTPException(status_code=404, detail="Not Found")
 
     # Konkrét statikus fájl (pl. /vite.svg, /favicon.ico)

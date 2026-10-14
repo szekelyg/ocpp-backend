@@ -83,14 +83,20 @@ async def test_public_list_hides_unpublished(client):
     pub_id, _ = await _seed_cp("CP-SHOWN", published=True)
     hid_id, _ = await _seed_cp("CP-HIDDEN", published=False)
 
+    async with TestSession() as s:
+        pub_pid = (await s.execute(select(ChargePoint.public_id).where(ChargePoint.id == pub_id))).scalar_one()
+        hid_pid = (await s.execute(select(ChargePoint.public_id).where(ChargePoint.id == hid_id))).scalar_one()
+
     r = await client.get("/api/charge-points/")
     assert r.status_code == 200
     ids = [c["id"] for c in r.json()]
-    assert pub_id in ids
-    assert hid_id not in ids
+    assert pub_pid in ids
+    assert hid_pid not in ids
 
-    assert (await client.get(f"/api/charge-points/{hid_id}")).status_code == 404
-    assert (await client.get(f"/api/charge-points/{pub_id}")).status_code == 200
+    # publikus id, régi sorszámos id és ocpp_id alapján sem érhető el a publikálatlan
+    for ref in (hid_pid, hid_id, "CP-HIDDEN"):
+        assert (await client.get(f"/api/charge-points/{ref}")).status_code == 404
+    assert (await client.get(f"/api/charge-points/{pub_pid}")).status_code == 200
 
 
 @pytest.mark.asyncio
@@ -155,7 +161,7 @@ async def test_publish_blocked_until_complete(client):
     assert {"location", "connector_type", "max_power_kw"} <= missing
 
     # A töltő továbbra sem látszik kint
-    assert cp_id not in [c["id"] for c in (await client.get("/api/charge-points/")).json()]
+    assert (await client.get("/api/charge-points/")).json() == []
 
 
 @pytest.mark.asyncio
@@ -176,7 +182,7 @@ async def test_configure_then_publish(client):
     assert body["missing_fields"] == []
 
     listed = (await client.get("/api/charge-points/")).json()
-    row = [c for c in listed if c["id"] == cp_id]
+    row = [c for c in listed if c["id"] == body["public_id"]]
     assert len(row) == 1
     assert row[0]["location_name"] == "Vörösmarty tér – bal oszlop"
     assert row[0]["latitude"] == pytest.approx(47.4979)
@@ -190,7 +196,7 @@ async def test_unpublish_hides_again(client):
     r = await client.put(f"/api/admin/charge-points/{cp_id}",
                          json={"is_published": False}, headers=ADMIN_AUTH)
     assert r.status_code == 200
-    assert cp_id not in [c["id"] for c in (await client.get("/api/charge-points/")).json()]
+    assert r.json()["public_id"] not in [c["id"] for c in (await client.get("/api/charge-points/")).json()]
 
 
 @pytest.mark.asyncio

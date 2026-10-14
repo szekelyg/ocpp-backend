@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import email_from_authorization, get_db
 from app.api.routers.admin import AdminPrincipal, verify_admin
-from app.db.models import ChargePoint, ChargeSession, MeterSample
+from app.db.models import ChargePoint, ChargeSession, ChargingIntent, MeterSample
 from app.ocpp.ocpp_ws import remote_start_transaction, remote_stop_transaction
 from app.ocpp.ocpp_utils import MIN_CHARGE_HUF, _price_huf_per_kwh
 from app.services.auth_tokens import verify_intent_token
@@ -137,13 +137,60 @@ def _session_to_dict(
         "phases": phases,
     }
     if cp is not None:
+        # Az ocpp_id / gyártó / típus nem megy ki (a töltő OCPP-azonosítója a kapcsolódás kulcsa).
+        loc = cp.__dict__.get("location")  # csak ha be van töltve (nincs lazy load async alatt)
         result["charge_point"] = {
-            "ocpp_id": cp.ocpp_id,
+            "id": cp.public_id,
+            "name": loc.name if loc is not None else None,
             "status": cp.status,
-            "model": cp.model,
-            "vendor": cp.vendor,
         }
     return result
+
+
+# ---------------------------------------------------------------------------
+# Hozzáférés a vendég/ügyfél session-nézetéhez (GET /{id}, GET /by-intent/{id})
+# ---------------------------------------------------------------------------
+# Korábban mindkettő publikus volt sorszámos id-val (bárki végigolvashatta a töltéseket).
+# Most bizonyíték kell (bármelyik elég):
+#   1) intent-token – a fizetéskor kiadott, aláírt token (success_url "t" / e-mail link),
+#      ?t=… query-ben vagy X-Intent-Token fejlécben;
+#   2) Bearer – a bejelentkezett fiók e-mailje egyezik az indítóéval;
+#   3) admin (Keycloak ev-admin vagy vész-Basic).
+
+_FORBIDDEN_HINT = (
+    "Ezt a töltést csak az indítója nézheti meg. Nyissa meg a fizetés után kapott oldalt "
+    "vagy az e-mailben küldött linket, illetve lépjen be az Energiafelhő-fiókjával."
+)
+
+
+async def _is_admin(authorization: Optional[str]) -> bool:
+    if not authorization:
+        return False
+    try:
+        await verify_admin(authorization)
+        return True
+    except HTTPException:
+        return False
+
+
+async def _may_view(
+    intent_id: Optional[int],
+    owner_email: Optional[str],
+    token: Optional[str],
+    authorization: Optional[str],
+    db: AsyncSession,
+) -> bool:
+    if token and verify_intent_token(token, intent_id):
+        return True
+    if authorization and owner_email:
+        email = await email_from_authorization(authorization, db)
+        if email and email == owner_email.strip().lower():
+            return True
+    return await _is_admin(authorization)
+
+
+def _forbidden() -> HTTPException:
+    return HTTPException(status_code=403, detail={"error": "session_view_not_authorized", "hint": _FORBIDDEN_HINT})
 
 
 async def _get_cp_by_id(db: AsyncSession, cp_id: int) -> ChargePoint:
@@ -242,16 +289,33 @@ async def get_active_session_for_cp(
 async def get_session_by_intent(
     intent_id: int,
     db: AsyncSession = Depends(get_db),
+    t: Optional[str] = Query(None, max_length=512),
+    x_intent_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
 ):
-    """PaySuccess polling: session keresése intent_id alapján."""
+    """PaySuccess polling: session keresése intent_id alapján (intent-token / saját fiók / admin)."""
+    token = t or x_intent_token
+    intent = (await db.execute(select(ChargingIntent).where(ChargingIntent.id == intent_id))).scalar_one_or_none()
+    if not await _may_view(intent_id, intent.anonymous_email if intent else None, token, authorization, db):
+        raise _forbidden()
+    if intent is None:
+        raise HTTPException(status_code=404, detail="Session not found for this intent")
     res = await db.execute(
         select(ChargeSession)
-        .options(selectinload(ChargeSession.charge_point))
+        .options(selectinload(ChargeSession.charge_point).selectinload(ChargePoint.location))
         .where(ChargeSession.intent_id == intent_id)
         .limit(1)
     )
     s = res.scalar_one_or_none()
     if not s:
+        if intent.status in ("expired", "cancelled"):
+            # Lejárt intent (pl. a 15 perc után fizetett) vagy foglalt töltő: a zárolást
+            # feloldottuk, session nem lesz – a PaySuccess ezt írja ki, nem pollozik tovább.
+            raise HTTPException(status_code=410, detail={
+                "error": f"intent_{intent.status}",
+                "reason": intent.cancel_reason,
+                "hint": "A töltés nem indult el; a kártyán zárolt összeget feloldottuk.",
+            })
         raise HTTPException(status_code=404, detail="Session not found for this intent")
     return _session_to_dict(s, s.charge_point)
 
@@ -349,18 +413,25 @@ async def stop_session(
 async def get_session(
     session_id: int,
     db: AsyncSession = Depends(get_db),
+    t: Optional[str] = Query(None, max_length=512),
+    x_intent_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
 ):
+    """ChargingPage polling – csak az indítónak (intent-token / saját fiók) vagy adminnak."""
     res = await db.execute(
         select(ChargeSession)
         .options(
-            selectinload(ChargeSession.charge_point),
+            selectinload(ChargeSession.charge_point).selectinload(ChargePoint.location),
             selectinload(ChargeSession.intent),
         )
         .where(ChargeSession.id == session_id)
     )
     s = res.scalar_one_or_none()
-    if not s:
-        raise HTTPException(status_code=404, detail="Session not found")
+    # Nem létező és nem engedélyezett session ugyanazt a 403-at kapja (ne lehessen id-t pásztázni).
+    if not s or not await _may_view(s.intent_id, s.anonymous_email, t or x_intent_token, authorization, db):
+        if s is None and await _is_admin(authorization):
+            raise HTTPException(status_code=404, detail="Session not found")
+        raise _forbidden()
     power_w = await _get_latest_power_w(db, s.id) if s.finished_at is None else None
     phases = await _get_latest_phases(db, s.id) if s.finished_at is None else None
     hold = s.intent.hold_amount_huf if s.intent else None

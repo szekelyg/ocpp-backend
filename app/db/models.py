@@ -1,4 +1,5 @@
 # app/db/models.py
+import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, Boolean, JSON, Text, UniqueConstraint
@@ -66,6 +67,11 @@ class ChargePoint(Base):
 
     ocpp_id = Column(String, unique=True, index=True, nullable=False)
 
+    # Stabil, pszeudonim azonosító a publikus API-hoz (térkép, QR ?cp=…). Az ocpp_id és a
+    # sorszámos id nem kerül ki publikusan (az ocpp_id a töltő OCPP-azonosítója is egyben).
+    public_id = Column(String(36), unique=True, index=True, nullable=False,
+                       default=lambda: str(uuid.uuid4()))
+
     serial_number = Column(String, nullable=True)
     model = Column(String, nullable=True)
     vendor = Column(String, nullable=True)
@@ -83,6 +89,15 @@ class ChargePoint(Base):
 
     status = Column(String(32), nullable=False, default="available")
     last_seen_at = Column(DateTime(timezone=True), nullable=True)
+
+    # OCPP 1.6 Security Profile 2 (TLS + HTTP Basic Auth), lásd app/ocpp/auth.py és
+    # docs/OCPP-HITELESITES.md. A kulcsot (AuthorizationKey) SOHA nem tároljuk, csak a hash-ét.
+    ocpp_auth_key_hash = Column(String(255), nullable=True)
+    ocpp_auth_key_set_at = Column(DateTime(timezone=True), nullable=True)
+    # Utolsó kapcsolódás: ok / missing / wrong / no_key – és hogy ws vagy wss volt-e.
+    ocpp_auth_last_result = Column(String(16), nullable=True)
+    ocpp_auth_last_at = Column(DateTime(timezone=True), nullable=True)
+    ocpp_last_scheme = Column(String(8), nullable=True)
 
     # Egy BootNotificationből felbukkanó töltő publikálatlan: a publikus API, a
     # fizetés-indítás és az OCPI is kihagyja, amíg admin be nem konfigurálta.
@@ -204,6 +219,9 @@ class ChargeSession(Base):
     intent_id = Column(Integer, ForeignKey("charging_intents.id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
     stop_code_hash = Column(String(255), nullable=True)
     invoice_number = Column(String(64), nullable=True)
+    # StopTransaction "reason" (OCPP 1.6: Local, Remote, EVDisconnected, PowerLoss, ...);
+    # NULL, ha a töltő nem küldte, vagy a sessiont nem StopTransaction zárta (timeout/admin).
+    stop_reason = Column(String(32), nullable=True)
 
     # OCPI Session/CDR fields. ocpi_session_id defaults to str(id) when emitted;
     # the token/auth fields are set for roaming sessions (OCPI Command / token
