@@ -644,6 +644,35 @@ CONFIG_CURRENT_LIMIT_KEYS = frozenset({"CurrentLimitUser", "CurrentLimitDefault"
 _MIN_CURRENT_A = 6   # IEC 61851: 6 A alatt nem tölt
 
 
+# Kulcsok, amelyeknek egyetlen pontos érték adható (jóváhagyott bevezetési lépések).
+# OCPPBackendJSONURL: a töltő átállítása titkosított (wss) kapcsolatra – Gellért jóváhagyta
+# 2026-10-14; bármi más érték (pl. ws:// vagy idegen host) elutasítva.
+CONFIG_FIXED_VALUE_KEYS = {
+    "OCPPBackendJSONURL": "wss://ocpp.energiafelho.hu/ocpp",
+}
+
+
+async def _change_fixed_value_key(cp_id: int, key: str, value: str, db: AsyncSession, who) -> dict:
+    from app.ocpp.registry import change_configuration, send_call_and_wait
+
+    if value != CONFIG_FIXED_VALUE_KEYS[key]:
+        raise HTTPException(status_code=422, detail={
+            "error": "value_not_allowed", "allowed": CONFIG_FIXED_VALUE_KEYS[key]})
+    cp = (await db.execute(select(ChargePoint).where(ChargePoint.id == cp_id))).scalar_one_or_none()
+    if not cp:
+        raise HTTPException(status_code=404, detail="ChargePoint not found")
+    try:
+        old = _cfg_map(await send_call_and_wait(cp.ocpp_id, "GetConfiguration", {"key": [key]}, timeout_s=15)).get(key)
+        res = await change_configuration(cp.ocpp_id, key, value)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail={"error": "ocpp_failed", "reason": str(e)})
+    status_ = (res or {}).get("status", "Unknown")
+    logger.warning("admin_change_cp_config cp=%s key=%s %s -> %s status=%s by=%s",
+                   cp.ocpp_id, key, old, value, status_, who.label)
+    return {"ok": status_ in ("Accepted", "RebootRequired"), "ocpp_id": cp.ocpp_id, "key": key,
+            "old": old, "new": value, "status": status_, "ocpp": res}
+
+
 class AdminConfigChangeIn(BaseModel):
     key: str
     value: str
@@ -664,9 +693,12 @@ async def admin_change_cp_config(
     from app.ocpp.registry import change_configuration, send_call_and_wait
 
     key = (body.key or "").strip()
+    if key in CONFIG_FIXED_VALUE_KEYS:
+        return await _change_fixed_value_key(cp_id, key, (body.value or "").strip(), db, who)
     if key not in CONFIG_CURRENT_LIMIT_KEYS:
         raise HTTPException(status_code=400, detail={
-            "error": "key_not_allowed", "allowed": sorted(CONFIG_CURRENT_LIMIT_KEYS)})
+            "error": "key_not_allowed",
+            "allowed": sorted(CONFIG_CURRENT_LIMIT_KEYS | set(CONFIG_FIXED_VALUE_KEYS))})
     raw = (body.value or "").strip()
     if not raw.isdigit():
         raise HTTPException(status_code=422, detail={"error": "value_must_be_integer_amps"})

@@ -487,7 +487,7 @@ async def test_admin_change_config_current_limit(client, monkeypatch):
 
     assert (await client.post(url, json={"key": "CurrentLimitUser", "value": "32"})).status_code == 401
     # nem engedélyezett kulcsok (pl. a hitelesítési bevezetés kulcsai) → 400, nincs küldés
-    for k in ("AuthorizationKey", "OCPPBackendJSONURL", "AllowOfflineTxForUnknownId", "CurrentDynamic"):
+    for k in ("AuthorizationKey", "AllowOfflineTxForUnknownId", "CurrentDynamic", "SecurityProfile"):
         r = await client.post(url, json={"key": k, "value": "1"}, headers=ADMIN_AUTH)
         assert r.status_code == 400, k
     for v in ("5", "33", "abc", "-1", "16.5"):
@@ -505,3 +505,36 @@ async def test_admin_change_config_current_limit(client, monkeypatch):
     state.pop("CurrentLimitHardware")
     r = await client.post(url, json={"key": "CurrentLimitDefault", "value": "32"}, headers=ADMIN_AUTH)
     assert r.status_code == 409 and len(changes) == 1
+
+
+@pytest.mark.asyncio
+async def test_admin_change_config_backend_url_only_exact_wss(client, monkeypatch):
+    state = {"OCPPBackendJSONURL": "ws://ocpp.energiafelho.hu/ocpp"}
+    changes = []
+
+    async def _fake_call(cp, action, payload, timeout_s=12.0):
+        return {"configurationKey": [{"key": k, "value": state[k]} for k in payload["key"] if k in state]}
+
+    async def _fake_change(cp, key, value):
+        changes.append((cp, key, value))
+        state[key] = value
+        return {"status": "Accepted"}
+
+    monkeypatch.setattr(registry, "send_call_and_wait", _fake_call)
+    monkeypatch.setattr(registry, "change_configuration", _fake_change)
+    cp_id, _ = await _cp("URL-1")
+    url = f"/api/admin/charge-points/{cp_id}/config"
+    for bad in ("ws://ocpp.energiafelho.hu/ocpp", "wss://evil.example/ocpp",
+                "wss://ocpp.energiafelho.hu/ocpp/", "WSS://ocpp.energiafelho.hu/ocpp", ""):
+        r = await client.post(url, json={"key": "OCPPBackendJSONURL", "value": bad}, headers=ADMIN_AUTH)
+        assert r.status_code == 422, bad
+    assert changes == []
+    assert (await client.post(url, json={"key": "OCPPBackendJSONURL",
+                                         "value": "wss://ocpp.energiafelho.hu/ocpp"})).status_code == 401
+    r = await client.post(url, json={"key": "OCPPBackendJSONURL", "value": "wss://ocpp.energiafelho.hu/ocpp"},
+                          headers=ADMIN_AUTH)
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert b["old"] == "ws://ocpp.energiafelho.hu/ocpp" and b["new"] == "wss://ocpp.energiafelho.hu/ocpp"
+    assert b["status"] == "Accepted"
+    assert changes == [("URL-1", "OCPPBackendJSONURL", "wss://ocpp.energiafelho.hu/ocpp")]

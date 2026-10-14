@@ -55,7 +55,7 @@ szerver localhostján van kint (`127.0.0.1:8010`), publikusan kizárólag a tunn
 | `DELETE /api/admin/charge-points/{id}/ocpp-auth-key` | Kulcs törlése (visszaállítás; log módban utána `no_key`). |
 | `POST /api/admin/charge-points/{id}/ocpp-auth-key/apply` body `{"key":"…"}` | A `ChangeConfiguration(AuthorizationKey)` kiküldése. **Alapból tiltva** (403), csak `OCPP_AUTH_APPLY_ENABLED=true` mellett működik, és csak a tárolt hash-sel egyező kulccsal (elgépelés ellen). |
 | `GET /api/admin/charge-points/{id}/config` | (meglévő) GetConfiguration – csak olvas. |
-| `POST /api/admin/charge-points/{id}/config` body `{"key","value"}` | ChangeConfiguration **szűk allowlisttel**: most csak `CurrentLimitUser`, `CurrentLimitDefault` (egész amper, 6..`CurrentLimitHardware`, a töltőből visszaolvasva). A régi→új érték naplózva. A bevezetési kulcsok (URL, AuthorizationKey, offline-kulcsok) itt szándékosan nem engedélyezettek. |
+| `POST /api/admin/charge-points/{id}/config` body `{"key","value"}` | ChangeConfiguration **szűk allowlisttel**: most csak `CurrentLimitUser`, `CurrentLimitDefault` (egész amper, 6..`CurrentLimitHardware`, a töltőből visszaolvasva), valamint `OCPPBackendJSONURL` KIZÁRÓLAG a `wss://ocpp.energiafelho.hu/ocpp` értékkel (jóváhagyva 2026-10-14). A régi→új érték naplózva. Az AuthorizationKey és az offline-kulcsok itt szándékosan nem engedélyezettek. |
 
 Az `OCPPBackendJSONURL` átírására nincs külön végpont; ezt a jóváhagyott bevezetéskor egy
 egyszeri, admin-hitelesített hívással (vagy a Voltie saját felületén) kell elvégezni.
