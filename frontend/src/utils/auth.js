@@ -223,10 +223,14 @@ async function refreshKc(session) {
       try {
         const tokens = await tokenRequest(cfg, { grant_type: "refresh_token", refresh_token: session.refresh_token });
         return writeKc(tokens);
-      } catch {
-        // lejárt SSO-session / visszavont token → kijelentkezett állapot
-        lsDel(KC_SESSION_KEY);
-        notify();
+      } catch (e) {
+        // Lejárt / kijelentkeztetett SSO-session, visszavont token: a Keycloak ezt hibakóddal
+        // (pl. invalid_grant) mondja meg → kijelentkezett állapot. Hálózati hibánál (nincs
+        // hibakód) a helyi belépést megtartjuk, a következő kérés újrapróbálja.
+        if (e?.code && e.code !== "token_error") {
+          lsDel(KC_SESSION_KEY);
+          notify();
+        }
         return null;
       } finally {
         _refreshing = null;
@@ -234,6 +238,31 @@ async function refreshKc(session) {
     })();
   }
   return _refreshing;
+}
+
+/**
+ * Oldalbetöltéskor: él-e még a Keycloak-munkamenet, amihez a helyi tokenek tartoznak.
+ *
+ * Energiafelhő, 2026-10-16 (Gellért jelezte): egy böngészőben a portálon kilépve és más fiókkal
+ * belépve az ev a localStorage-ban tárolt RÉGI fiókot mutatta, amíg az access token le nem járt.
+ * Egy azonnali refresh ezt eldönti: kijelentkezett vagy lejárt SSO-munkamenetnél a Keycloak
+ * elutasítja (invalid_grant), és a helyi belépés megszűnik.
+ */
+export async function revalidateSession() {
+  const kc = readKc();
+  if (!kc?.refresh_token) return;
+  await refreshKc(kc);
+}
+
+/**
+ * Belépés a közös fiókkal úgy, hogy a helyi (esetleg más felhasználóhoz tartozó) tokeneket
+ * előbb eldobjuk. A portál ide linkel (`/auth/keycloak?return_to=/toltesek`): élő
+ * SSO-munkamenetnél ez egy láthatatlan oda-vissza a Keycloakhoz, és a portálon belépett
+ * felhasználó lesz belépve.
+ */
+export async function switchToKeycloakUser({ returnTo } = {}) {
+  clearAuth();
+  await startKeycloakLogin({ returnTo });
 }
 
 /** Érvényes Keycloak access token (szükség esetén frissítve), különben "". */

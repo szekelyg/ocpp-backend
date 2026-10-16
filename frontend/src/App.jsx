@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Routes, Route } from "react-router-dom";
 
 import Home from "./pages/Home.jsx";
@@ -9,8 +10,16 @@ import Aszf from "./pages/Aszf.jsx";
 import NotFound from "./pages/NotFound.jsx";
 import MySessions from "./pages/MySessions.jsx";
 import KeycloakCallback from "./pages/KeycloakCallback.jsx";
+import KeycloakStart from "./pages/KeycloakStart.jsx";
+import { revalidateSession } from "./utils/auth";
 
 export default function App() {
+  // Oldalbetöltéskor: a tárolt belépés még érvényes-e a Keycloaknál (lásd utils/auth.js).
+  useEffect(() => {
+    if (window.location.pathname.startsWith("/auth/keycloak")) return;
+    revalidateSession();
+  }, []);
+
   return (
     <Routes>
       <Route path="/" element={<Home />} />
@@ -21,6 +30,7 @@ export default function App() {
       <Route path="/aszf" element={<Aszf />} />
       <Route path="/adatkezeles" element={<AdatkezelesAtiranyitas />} />
       <Route path="/toltesek" element={<MySessions />} />
+      <Route path="/auth/keycloak" element={<KeycloakStart />} />
       <Route path="/auth/keycloak/callback" element={<KeycloakCallback />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
