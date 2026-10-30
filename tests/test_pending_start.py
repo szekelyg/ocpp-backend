@@ -142,7 +142,8 @@ def test_paid_then_available_then_preparing_restarts_and_charges(monkeypatch, _s
     def call(uid, action, payload):
         return json.dumps([2, uid, action, payload])
 
-    with TestClient(app) as tc, tc.websocket_connect("/ocpp/norg_onk_2") as ws:
+    # Lifespan (háttér-körök) nélkül: azok saját időzítéssel írnák a teszt-DB-t
+    with TestClient(app).websocket_connect("/ocpp/norg_onk_2") as ws:
         # A töltő 59 mp múlva visszavált Available-re (lejárt a ConnectionTimeOut)
         clock.t += 59
         ws.send_text(call("s1", "StatusNotification", {"connectorId": 1, "status": "Available", "errorCode": "NoError"}))
@@ -215,7 +216,7 @@ async def test_reconnect_and_preparing_share_the_limit(monkeypatch, _setup):
 
 
 @pytest.mark.parametrize("kw", [
-    {"age_min": 20},                         # lejárt (a 15 perces timeout előtt feladjuk)
+    {"age_min": 20},                         # lejárt (a waiting timeout előtt 1 perccel feladjuk)
     {"tx": "123"},                           # már elindult (StartTransaction megjött)
     {"finished": True},                      # lezárva / törölve
     {"intent_status": "pending_payment"},    # nincs kifizetve

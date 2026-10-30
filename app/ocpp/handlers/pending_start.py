@@ -4,7 +4,7 @@ Kifizetett, de még el nem indult (függő) munkamenet RemoteStartTransaction-je
 
 Függő munkamenet: a Stripe-webhook létrehozta (intent = paid), de StartTransaction még
 nem jött (ocpp_transaction_id IS NULL, finished_at IS NULL), és a lejárati ablakon belül
-van (a main.py waiting-timeoutja 15 perc után lezárja és feloldja a zárolást).
+van (a main.py waiting-timeoutja WAITING_TIMEOUT_MINUTES után lezárja és feloldja a zárolást).
 
 Mikor küldünk (újra) RemoteStartot – mind ugyanazon a függvényen át, egységes naplóval:
   - fizetés után (payments_stripe) – az első küldés, csak az időpontját jegyezzük;
@@ -14,15 +14,15 @@ Mikor küldünk (újra) RemoteStartot – mind ugyanazon a függvényen át, egy
     visszaváltott Available-re, a később bedugott autóhoz már nem volt engedély);
   - kézzel az adminból (POST /api/admin/sessions/{id}/remote-start).
 
-Elsődleges megoldás: a töltő ConnectionTimeOut-ja a teljes függő ablak (adminból állítható,
-60 mp – WAITING_TIMEOUT_MINUTES). Az automatikus újraküldés tartalék arra az esetre, ha egy
+Elsődleges megoldás: a töltő ConnectionTimeOut-ja a teljes függő ablak (kötelező beállítás,
+app/ocpp/required_config.py). Az automatikus újraküldés tartalék arra az esetre, ha egy
 töltő nem fogadja el a nagy értéket, vagy közben újraindul.
 
 Védelmek az automatikus újraküldésre (a kézi küldésre nem):
   - munkamenetenként legfeljebb MAX_AUTO_RETRIES újraküldés;
   - két küldés között legalább MIN_GAP_S (a fizetés utáni első küldést is beleértve, így a
     RemoteStart után szokásos Preparing nem vált ki azonnali újraküldést).
-A számlálók processz-memóriában vannak (a munkamenet úgyis legfeljebb 15 percig függő;
+A számlálók processz-memóriában vannak (a munkamenet úgyis legfeljebb WAITING_TIMEOUT_MINUTES-ig függő;
 backend-újraindítás után a töltő újracsatlakozik, és a boot-ág újraküld).
 """
 from __future__ import annotations
@@ -44,9 +44,11 @@ from app.ocpp.time_utils import utcnow
 
 logger = logging.getLogger("ocpp")
 
-# Függő munkamenet lejárata: ennyi perc után a main.py waiting-timeoutja lezárja és feloldja
-# a Stripe-zárolást. Közös forrás (main.py, admin ConnectionTimeOut felső határa).
-WAITING_TIMEOUT_MINUTES = 15
+# Függő munkamenet lejárata a sikeres fizetéstől (a session a webhookban, a fizetéskor jön
+# létre; started_at = akkor): ennyi perc után a main.py waiting-timeoutja lezárja és feloldja
+# a Stripe-zárolást. Közös forrás: main.py, és a töltő kötelező ConnectionTimeOut-ja
+# (required_config.py) is ebből jön (5 perc = 300 mp).
+WAITING_TIMEOUT_MINUTES = 5
 
 MAX_AUTO_RETRIES = 3       # automatikus újraküldés munkamenetenként
 MIN_GAP_S = 20.0           # legalább ennyi mp két küldés között

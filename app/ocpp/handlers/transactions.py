@@ -89,7 +89,7 @@ async def start_transaction(cp_id: str, payload: dict) -> Optional[int]:
                 # Fallback: a töltő más csatlakozó-számot (vagy semmit) küldött, mint
                 # amire a fizetés szólt. A töltőn EGY nyitott, indulásra váró session
                 # van – ahhoz kötjük, különben a kifizetett session tx nélkül maradna
-                # (15 perc múlva timeout + zárolás feloldás), a tényleges töltés pedig
+                # (WAITING_TIMEOUT_MINUTES után timeout + zárolás feloldás), a tényleges töltés pedig
                 # egy fizetéshez nem kötött, számlázatlan sessionbe futna.
                 existing = await _find_pending(match_connector=False)
                 if existing is not None:

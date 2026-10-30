@@ -67,6 +67,12 @@ async def get_ws(cp_id: str) -> Optional[WebSocket]:
         return _ACTIVE_WS.get(cp_id)
 
 
+async def connected_ids() -> list[str]:
+    """A most csatlakozó töltők OCPP-azonosítói."""
+    async with _REGISTRY_LOCK:
+        return sorted(_ACTIVE_WS)
+
+
 async def _next_unique_id(cp_id: str) -> str:
     async with _REGISTRY_LOCK:
         cur = _CP_MSG_COUNTER.get(cp_id, 900_000_000)

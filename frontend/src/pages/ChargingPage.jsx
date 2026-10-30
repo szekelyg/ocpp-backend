@@ -5,7 +5,7 @@ import StatusBadge from "../components/ui/StatusBadge";
 import { authHeaders } from "../utils/auth";
 
 const POLL_MS = 3_000;
-const WAITING_TIMEOUT_S = 15 * 60; // 15 perc
+const WAITING_TIMEOUT_S = 5 * 60; // 5 perc – backend: pending_start.WAITING_TIMEOUT_MINUTES
 const REDIRECT_DELAY_S = 30;
 
 function formatDuration(s) {
@@ -211,7 +211,7 @@ export default function ChargingPage() {
           <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 space-y-1">
             <div className="font-semibold text-rose-700">✕ Töltés nem indult el</div>
             <div className="text-sm text-rose-600">
-              Az autó 15 percen belül nem csatlakozott. A munkamenet lezárult,
+              Az autó 5 percen belül nem csatlakozott. A munkamenet lezárult,
               a befizetett összeg visszatérítése folyamatban van.
             </div>
             {redirectCountdown !== null && (

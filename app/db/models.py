@@ -99,6 +99,10 @@ class ChargePoint(Base):
     ocpp_auth_last_at = Column(DateTime(timezone=True), nullable=True)
     ocpp_last_scheme = Column(String(8), nullable=True)
 
+    # Kötelező beállítások (app/ocpp/required_config.py) utolsó ellenőrzésének eredménye:
+    # {"summary": ok|differs|rejected|error, "keys": {kulcs: {old, want, status, new}}, ...}
+    required_config_state = Column(JSON, nullable=True)
+
     # Egy BootNotificationből felbukkanó töltő publikálatlan: a publikus API, a
     # fizetés-indítás és az OCPI is kihagyja, amíg admin be nem konfigurálta.
     is_published = Column(
@@ -183,7 +187,7 @@ class ChargingIntent(Base):
     cancel_reason = Column(String(64), nullable=True)
     last_error = Column(String(255), nullable=True)
 
-    # 15 perc után automatikusan expire
+    # 15 perc után automatikusan expire (fizetés előtti intent; a fizetett munkamenet ablaka külön: pending_start)
     expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)

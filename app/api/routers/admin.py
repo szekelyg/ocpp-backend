@@ -19,6 +19,7 @@ from app.db.models import ChargePoint, ChargeSession, ChargingIntent, Location
 from app.api.routers.charge_points import compute_status
 from app.services.auth_tokens import issue_intent_token
 from app.ocpp.handlers.pending_start import WAITING_TIMEOUT_MINUTES
+from app.ocpp.required_config import REQUIRED_CONFIG, apply_required_config
 
 logger = logging.getLogger("admin")
 
@@ -261,6 +262,8 @@ def _cp_dict_admin(cp: ChargePoint) -> dict:
             "last_at": cp.ocpp_auth_last_at.isoformat() if cp.ocpp_auth_last_at else None,
             "last_scheme": cp.ocpp_last_scheme,
         },
+        # Kötelező beállítások (ConnectionTimeOut, offline töltés tiltása) utolsó ellenőrzése
+        "required_config": cp.required_config_state,
     }
 
 
@@ -697,6 +700,38 @@ async def admin_unlock_connector(
     return {"ok": True, "ocpp_id": cp.ocpp_id, "connector_id": connector_id, "ocpp": res}
 
 
+# ── Kötelező beállítások alkalmazása most (app/ocpp/required_config.py) ─────────
+# Bootkor magától fut; ezzel élesítés után azonnal kiküldhető, nem kell a töltők
+# újraindulására várni. Csak a rögzített REQUIRED_CONFIG kulcsokat küldi.
+
+@router.post("/charge-points/required-config")
+async def admin_apply_required_config_all(who: AdminPrincipal = Depends(verify_admin)):
+    """Kötelező beállítások az összes most csatlakozó töltőre."""
+    from app.ocpp.registry import connected_ids
+    ids = await connected_ids()
+    results = await asyncio.gather(*(apply_required_config(i, f"admin:{who.label}") for i in ids))
+    out = {i: r for i, r in zip(ids, results)}
+    logger.warning("admin_required_config ALL %s by=%s",
+                   {i: r["summary"] for i, r in out.items()}, who.label)
+    return {"ok": all(r["summary"] == "ok" for r in results), "required": REQUIRED_CONFIG, "results": out}
+
+
+@router.post("/charge-points/{cp_id}/required-config")
+async def admin_apply_required_config(
+    cp_id: int,
+    db: AsyncSession = Depends(get_db),
+    who: AdminPrincipal = Depends(verify_admin),
+):
+    """Kötelező beállítások egy töltőre."""
+    cp = (await db.execute(select(ChargePoint).where(ChargePoint.id == cp_id))).scalar_one_or_none()
+    if not cp:
+        raise HTTPException(status_code=404, detail="ChargePoint not found")
+    await _require_online(cp.ocpp_id)
+    state = await apply_required_config(cp.ocpp_id, f"admin:{who.label}")
+    logger.warning("admin_required_config cp=%s eredmény=%s by=%s", cp.ocpp_id, state["summary"], who.label)
+    return {"ok": state["summary"] == "ok", "ocpp_id": cp.ocpp_id, "required": REQUIRED_CONFIG, "state": state}
+
+
 @router.get("/charge-points/{cp_id}/config")
 async def admin_get_cp_config(
     cp_id: int,
@@ -737,10 +772,11 @@ CONFIG_FIXED_VALUE_KEYS = {
 
 # Egész értékű kulcsok tartománnyal (a töltőből visszaolvasott régi értéket naplózzuk).
 # ConnectionTimeOut: ennyi mp-ig vár a töltő az autó bedugására egy engedélyezett indítás
-# (RemoteStart) után. A norg_onk_2-n 60 mp volt (2026-10-28), a többin 180. Felső határ: a
-# függő munkamenet lejárata – így a töltő a fizetés utáni teljes ablakban várhat a bedugásra.
+# (RemoteStart) után. A norg_onk_2-n 60 mp volt (2026-10-28), a többin 180. A kötelező érték
+# (a függő munkamenet lejárata, 300 mp) bootkor magától kimegy (app/ocpp/required_config.py);
+# itt kézzel 60–900 mp között állítható.
 CONFIG_RANGE_KEYS = {
-    "ConnectionTimeOut": (60, WAITING_TIMEOUT_MINUTES * 60),
+    "ConnectionTimeOut": (60, 900),
 }
 
 CONFIG_ALLOWED_KEYS = sorted(CONFIG_CURRENT_LIMIT_KEYS | set(CONFIG_FIXED_VALUE_KEYS) | set(CONFIG_RANGE_KEYS))
@@ -1128,7 +1164,7 @@ _REMOTE_START_SKIP_HINTS = {
     "finished": "A munkamenet már lezárult.",
     "already_started": "A töltés már elindult (megjött a StartTransaction).",
     "not_paid": "A munkamenethez nem tartozik kifizetett intent.",
-    "expired": "A munkamenet lejárt (a 15 perces várakozási idő vége) – a zárolás feloldása folyamatban.",
+    "expired": f"A munkamenet lejárt (a {WAITING_TIMEOUT_MINUTES} perces várakozási idő vége) – a zárolás feloldása folyamatban.",
 }
 
 

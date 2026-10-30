@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import Identity, get_db, get_optional_identity
 from app.api.routers.charge_points import compute_status, resolve_public_charge_point
-from app.db.models import ChargePoint, ChargingIntent, User
+from app.db.models import ChargePoint, ChargeSession, ChargingIntent, User
 from app.services.auth_tokens import issue_intent_token
 
 logger = logging.getLogger("intents")
@@ -160,6 +160,27 @@ async def create_intent(
                 "error": "charge_point_not_available",
                 "status": status_now,
                 "startable_statuses": sorted(_startable),
+            },
+        )
+
+    # 1a) Foglaltság: nyitott munkamenet ezen a csatlakozón (főleg a kifizetett, még el nem
+    # indult: a töltő ilyenkor „available”/„preparing”, mégis valaki másé). Fizetés előtt
+    # szólunk – különben a webhook csak utólag, a zárolás feloldásával tudná kezelni.
+    busy = (
+        await db.execute(
+            select(ChargeSession.id).where(
+                ChargeSession.charge_point_id == cp.id,
+                ChargeSession.connector_id == int(body.connector_id),
+                ChargeSession.finished_at.is_(None),
+            ).limit(1)
+        )
+    ).first()
+    if busy:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "charge_point_busy",
+                "hint": "A töltőt épp más használja, próbálja pár perc múlva.",
             },
         )
 

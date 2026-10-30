@@ -20,6 +20,7 @@ from app.ocpp.registry import (
     change_configuration,
 )
 from app.ocpp import auth as ocpp_auth
+from app.ocpp.required_config import apply_required_config
 from app.ocpp.handlers.boot import upsert_charge_point_from_boot
 from app.ocpp.handlers.heartbeat import touch_last_seen
 from app.ocpp.handlers.status import save_status_notification
@@ -240,6 +241,8 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
                 await upsert_charge_point_from_boot(cp_id, payload)
                 response = [3, unique_id, {"status": "Accepted", "currentTime": iso_utc_now_z(), "interval": 60}]
                 await ws.send_text(json.dumps(response))
+                # Kötelező beállítások (ConnectionTimeOut, offline töltés tiltása): bootonként egyszer
+                asyncio.create_task(apply_required_config(cp_id, "boot"))
                 # Reconnect után megnézzük van-e pending session (nem blokkol)
                 asyncio.create_task(retry_pending_remote_start(cp_id))
                 # MeterValues intervallum csökkentése 15 mp-re (alapból ~60s)

@@ -625,6 +625,30 @@ function ChargerConfigModal({ cp, busy, onClose, onSave }) {
   );
 }
 
+// Kötelező beállítások állapota (backend: app/ocpp/required_config.py)
+function reqConfigLabel(state) {
+  if (!state) return { text: "még nem ellenőrzött", color: "text-ink-muted" };
+  const keys = Object.entries(state.keys || {});
+  const bad = keys.filter(([, k]) => !["ok", "Accepted", "RebootRequired"].includes(k.status)).map(([n]) => n);
+  const off = keys.filter(([, k]) => String(k.new ?? "").toLowerCase() !== String(k.want).toLowerCase()).map(([n]) => n);
+  switch (state.summary) {
+    case "ok": return { text: "rendben ✓", color: "text-[#037a5c]" };
+    case "rejected": return { text: `elutasítva (${bad.join(", ")})`, color: "text-rose-600" };
+    case "differs": return { text: `eltér (${off.join(", ")})`, color: "text-brand-amber" };
+    case "error": return { text: `hiba (${state.error || "?"})`, color: "text-rose-600" };
+    default: return { text: state.summary, color: "text-ink-muted" };
+  }
+}
+
+function RequiredConfigBadge({ state }) {
+  const { text, color } = reqConfigLabel(state);
+  const title = state
+    ? Object.entries(state.keys || {}).map(([n, k]) => `${n}: ${k.old ?? "—"} → ${k.new ?? "—"} (${k.status})`).join("\n")
+      + `\n${state.reason || ""} · ${state.checked_at ? fmtDt(state.checked_at) : ""}`
+    : "Bootkor vagy a „Kötelező beállítások” gombbal ellenőrizzük";
+  return <div className={`text-xs mt-1 whitespace-nowrap ${color}`} title={title}>Beállítások: {text}</div>;
+}
+
 function ChargersTab({ chargers, apiFetch, toast, onRefresh }) {
   const [resetBusy, setResetBusy] = useState(null);
   const [configOpen, setConfigOpen] = useState(null);
@@ -637,6 +661,7 @@ function ChargersTab({ chargers, apiFetch, toast, onRefresh }) {
   const [deleteBusy, setDeleteBusy] = useState(null);
   const [unlockBusy, setUnlockBusy] = useState(null);
   const [timeoutBusy, setTimeoutBusy] = useState(null);
+  const [reqBusy, setReqBusy] = useState(null);   // cp.id vagy "all"
 
   const STARTABLE = ["available", "preparing", "finishing"];
 
@@ -701,8 +726,8 @@ function ChargersTab({ chargers, apiFetch, toast, onRefresh }) {
 
   async function doConnectionTimeout(cp) {
     const raw = window.prompt(
-      `${cp.ocpp_id} – várakozási idő (ConnectionTimeOut): ennyi mp-ig vár a töltő az autó bedugására a fizetés után. 60–900 mp:`,
-      "900"
+      `${cp.ocpp_id} – várakozási idő (ConnectionTimeOut): ennyi mp-ig vár a töltő az autó bedugására a fizetés után. 60–900 mp (kötelező: 300):`,
+      "300"
     );
     if (raw === null) return; // mégse
     setTimeoutBusy(cp.id);
@@ -721,6 +746,31 @@ function ChargersTab({ chargers, apiFetch, toast, onRefresh }) {
       toast(`Várakozási idő hiba: ${e.message}`, "err");
     } finally {
       setTimeoutBusy(null);
+    }
+  }
+
+  // Kötelező beállítások (ConnectionTimeOut=300, offline töltés tiltva) – bootkor magától is
+  async function doRequiredConfig(cp) {
+    setReqBusy(cp ? cp.id : "all");
+    try {
+      const res = await apiFetch(
+        cp ? `/api/admin/charge-points/${cp.id}/required-config` : "/api/admin/charge-points/required-config",
+        { method: "POST" }
+      );
+      if (cp) {
+        toast(`${cp.ocpp_id} kötelező beállítások: ${reqConfigLabel(res.state).text}`, res.ok ? "ok" : "err");
+      } else {
+        const entries = Object.entries(res.results || {});
+        const bad = entries.filter(([, st]) => st.summary !== "ok").map(([id, st]) => `${id}: ${reqConfigLabel(st).text}`);
+        toast(entries.length === 0 ? "Nincs csatlakozott töltő"
+          : bad.length ? `Kötelező beállítások – eltérés: ${bad.join("; ")}`
+          : `Kötelező beállítások rendben mind a ${entries.length} töltőn`, bad.length ? "err" : "ok");
+      }
+      onRefresh?.();
+    } catch (e) {
+      toast(`Kötelező beállítások hiba: ${e.message}`, "err");
+    } finally {
+      setReqBusy(null);
     }
   }
 
@@ -808,7 +858,10 @@ function ChargersTab({ chargers, apiFetch, toast, onRefresh }) {
       <tr className="hover:bg-brand-panel">
         <Td>{cp.id}</Td>
         <Td><span className="font-mono text-xs text-ink">{cp.ocpp_id}</span></Td>
-        <Td><Badge status={cp.status} label={cp.status} /></Td>
+        <Td>
+          <Badge status={cp.status} label={cp.status} />
+          <RequiredConfigBadge state={cp.required_config} />
+        </Td>
         <Td>
           <div>{cp.location_name || <span className="text-brand-amber">nincs helyszín</span>}</div>
           {cp.address_text && <div className="text-xs text-ink-muted">{cp.address_text}</div>}
@@ -876,6 +929,12 @@ function ChargersTab({ chargers, apiFetch, toast, onRefresh }) {
               title="OCPP Hard Reset küldése"
             />
             <ActionBtn
+              label="Kötelező beállítások" color="blue"
+              busy={reqBusy === cp.id}
+              onClick={() => doRequiredConfig(cp)}
+              title="ConnectionTimeOut=300, offline töltés tiltása – kiolvasás, eltérésnél beállítás, visszaolvasás"
+            />
+            <ActionBtn
               label="Zár kioldása" color="amber"
               busy={unlockBusy === cp.id}
               onClick={() => doUnlock(cp)}
@@ -938,6 +997,15 @@ function ChargersTab({ chargers, apiFetch, toast, onRefresh }) {
           <ChargerTable rows={pending} />
         </div>
       )}
+
+      <div className="flex items-center gap-3">
+        <ActionBtn
+          label="Kötelező beállítások alkalmazása most – minden csatlakozott töltőre" color="blue"
+          busy={reqBusy === "all"} busyLabel="Alkalmazás…"
+          onClick={() => doRequiredConfig(null)}
+          title="ConnectionTimeOut=300, offline töltés tiltása az összes most csatlakozó töltőn (bootkor magától is lefut)"
+        />
+      </div>
 
       <div>
         <SectionHead>Éles töltők ({live.length})</SectionHead>
