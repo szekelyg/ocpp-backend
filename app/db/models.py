@@ -226,6 +226,10 @@ class ChargeSession(Base):
     # StopTransaction "reason" (OCPP 1.6: Local, Remote, EVDisconnected, PowerLoss, ...);
     # NULL, ha a töltő nem küldte, vagy a sessiont nem StopTransaction zárta (timeout/admin).
     stop_reason = Column(String(32), nullable=True)
+    # Kifizetett, el nem indult munkamenet, amelynek az 5 perces ablaka úgy járt le, hogy a töltő
+    # épp offline volt: ekkortól várunk a töltő visszatérésére (a töltés közben netkapcsolat
+    # nélkül is folyhat). NULL = nem várt offline töltőre. Lásd pending_start.py.
+    offline_wait_since = Column(DateTime(timezone=True), nullable=True)
 
     # OCPI Session/CDR fields. ocpi_session_id defaults to str(id) when emitted;
     # the token/auth fields are set for roaming sessions (OCPI Command / token

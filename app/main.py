@@ -4,11 +4,12 @@ import os
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import and_, select
+from sqlalchemy import and_, select, update
 from sqlalchemy.orm import selectinload
 
 from app.api.routers.charge_points import router as charge_points_router
@@ -83,12 +84,22 @@ async def _try_stripe_cancel_or_refund(checkout_session_id: str, charge_session_
 
 
 async def _expire_waiting_sessions_once() -> None:
+    """Kifizetett, el nem indult munkamenetek az ablak (WAITING_TIMEOUT_MINUTES) lejárta után.
+
+    - a töltő online → lezárás + zárolás feloldása + „nem indult el” e-mail (eddigi viselkedés);
+    - a töltő offline → offline-ra vár (offline_wait_since), a zárolás marad, e-mail nem megy:
+      a töltés net nélkül is folyhat, a StartTransaction visszacsatlakozáskor jön (pending_start.py);
+    - offline-ra váró munkamenet → lezárás + feloldás, ha a töltő visszajött, de RECONNECT_GRACE_S
+      alatt nem jött StartTransaction, vagy ha letelt az OFFLINE_WAIT_MAX_HOURS a fizetéstől.
+    """
     from app.db.session import AsyncSessionLocal
     from app.db.models import ChargeSession
+    from app.ocpp import registry
+    from app.ocpp.handlers import pending_start as ps
     from app.ocpp.time_utils import utcnow
-    from app.services.email import send_no_start_email
 
-    cutoff = utcnow() - timedelta(minutes=_WAITING_TIMEOUT_MINUTES)
+    now = utcnow()
+    cutoff = now - timedelta(minutes=_WAITING_TIMEOUT_MINUTES)
 
     async with AsyncSessionLocal() as db:
         res = await db.execute(
@@ -106,34 +117,98 @@ async def _expire_waiting_sessions_once() -> None:
         sessions = res.scalars().all()
 
     for cs in sessions:
-        logger.warning(
-            f"WaitingTimeout: session_id={cs.id} started_at={cs.started_at} – marking finished"
-        )
-        async with AsyncSessionLocal() as db:
-            from app.db.models import ChargeSession as CS
-            from app.ocpp.time_utils import utcnow as _now
-            # Re-fetch to avoid detached instance issues
-            row = (await db.execute(
-                select(CS).options(selectinload(CS.intent)).options(selectinload(CS.charge_point))
-                .where(CS.id == cs.id)
-            )).scalar_one_or_none()
-            if row is None or row.finished_at is not None:
-                continue  # already handled
-            row.finished_at = _now()
-            await db.commit()
+        cp = cs.charge_point
+        cp_ocpp_id = cp.ocpp_id if cp else "—"
 
-        # Stripe refund
-        if cs.intent and cs.intent.payment_provider == "stripe" and cs.intent.payment_provider_ref:
-            await _try_stripe_cancel_or_refund(cs.intent.payment_provider_ref, cs.id)
-
-        # Email
-        if cs.anonymous_email:
-            cp_ocpp_id = cs.charge_point.ocpp_id if cs.charge_point else "—"
-            await send_no_start_email(
-                to=cs.anonymous_email,
-                session_id=cs.id,
-                cp_ocpp_id=cp_ocpp_id,
+        if cs.offline_wait_since is None:
+            if cp is not None and await ps.charger_offline(cp):
+                if await _set_offline_wait(cs.id, now):
+                    logger.warning(
+                        f"OfflineWait: session_id={cs.id} cp={cp_ocpp_id} – lejárt az ablak, a töltő offline: "
+                        f"offline-ra vár, a zárolás marad (legkésőbb {ps.offline_wait_deadline(cs).isoformat()})"
+                    )
+                continue
+            logger.warning(
+                f"WaitingTimeout: session_id={cs.id} started_at={cs.started_at} – marking finished"
             )
+            await _close_not_started(cs)
+            continue
+
+        # Offline-ra vár: letelt a felső határ?
+        if now >= ps.offline_wait_deadline(cs):
+            if await _close_not_started(cs, reason=(
+                f"A töltővel megszakadt a kapcsolat, és {ps.OFFLINE_WAIT_MAX_HOURS} órán belül nem lett "
+                f"újra elérhető, ezért a munkamenetet lezártuk. A zárolt összeget nem terheljük."
+            )):
+                logger.warning(
+                    f"OfflineWait lejárt: session_id={cs.id} cp={cp_ocpp_id} – {ps.OFFLINE_WAIT_MAX_HOURS} óra "
+                    f"alatt nem jött StartTransaction: lezárva, zárolás feloldva"
+                )
+            continue
+
+        # Visszajött a töltő, és a türelmi idő alatt sem jött StartTransaction → nem indult el
+        back = await registry.connected_since(cp_ocpp_id) if cp else None
+        if (back is not None and not await ps.charger_offline(cp)
+                and now - back >= timedelta(seconds=ps.RECONNECT_GRACE_S)):
+            if await _close_not_started(cs, reason=(
+                "A töltővel megszakadt a kapcsolat. Amikor újra elérhető lett, nem jelezte, hogy a "
+                "töltés elindult, ezért a munkamenetet lezártuk."
+            )):
+                logger.warning(
+                    f"OfflineWait: session_id={cs.id} cp={cp_ocpp_id} – visszajött ({back.isoformat()}), "
+                    f"de {ps.RECONNECT_GRACE_S} mp alatt nem jött StartTransaction: nem indult el, "
+                    f"lezárva, zárolás feloldva"
+                )
+
+
+async def _set_offline_wait(session_id: int, now) -> bool:
+    """Offline-ra vár jelölés – csak ha közben nem indult el és nem zárult le."""
+    from app.db.session import AsyncSessionLocal
+    from app.db.models import ChargeSession
+    async with AsyncSessionLocal() as db:
+        res = await db.execute(
+            update(ChargeSession)
+            .where(and_(ChargeSession.id == session_id, ChargeSession.finished_at.is_(None),
+                        ChargeSession.ocpp_transaction_id.is_(None)))
+            .values(offline_wait_since=now)
+        )
+        await db.commit()
+        return res.rowcount == 1
+
+
+async def _close_not_started(cs, reason: Optional[str] = None) -> bool:
+    """El nem indult munkamenet lezárása + Stripe-zárolás feloldása + „nem indult el” e-mail.
+    Feltételes: ha közben megjött a StartTransaction vagy lezárták, nem csinál semmit (False)."""
+    from app.db.session import AsyncSessionLocal
+    from app.db.models import ChargeSession
+    from app.ocpp.time_utils import utcnow
+    from app.services.email import send_no_start_email
+
+    async with AsyncSessionLocal() as db:
+        res = await db.execute(
+            update(ChargeSession)
+            .where(and_(ChargeSession.id == cs.id, ChargeSession.finished_at.is_(None),
+                        ChargeSession.ocpp_transaction_id.is_(None)))
+            .values(finished_at=utcnow())
+        )
+        await db.commit()
+        if res.rowcount != 1:
+            return False  # már elindult vagy lezárták
+
+    # Stripe: zárolás feloldása
+    if cs.intent and cs.intent.payment_provider == "stripe" and cs.intent.payment_provider_ref:
+        await _try_stripe_cancel_or_refund(cs.intent.payment_provider_ref, cs.id)
+
+    # Email
+    if cs.anonymous_email:
+        cp_ocpp_id = cs.charge_point.ocpp_id if cs.charge_point else "—"
+        await send_no_start_email(
+            to=cs.anonymous_email,
+            session_id=cs.id,
+            cp_ocpp_id=cp_ocpp_id,
+            reason=reason,
+        )
+    return True
 
 
 async def _expire_stale_charging_sessions_once() -> None:

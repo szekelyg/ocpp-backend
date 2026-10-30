@@ -43,7 +43,9 @@ def _duration_s(s: ChargeSession) -> Optional[int]:
 
 def _status(s: ChargeSession) -> str:
     if s.finished_at is None:
-        return "active" if s.ocpp_transaction_id else "waiting"
+        if s.ocpp_transaction_id:
+            return "active"
+        return "offline_wait" if s.offline_wait_since is not None else "waiting"
     if s.ocpp_transaction_id is None:
         return "timed_out"
     return "finished"

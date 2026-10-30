@@ -165,14 +165,20 @@ async def send_no_start_email(
     to: str,
     session_id: int,
     cp_ocpp_id: str = "—",
+    reason: Optional[str] = None,
 ) -> bool:
-    """Töltés nem indult el (autó nem csatlakozott időben) – értesítés + visszatérítés."""
+    """Töltés nem indult el – értesítés + visszatérítés.
+
+    reason: a lezárás oka, ha nem az alapeset (az autó nem csatlakozott időben), hanem pl. a
+    töltő offline volt (main.py lejárati köre, offline-ra váró munkamenet)."""
     from app.ocpp.handlers.pending_start import WAITING_TIMEOUT_MINUTES
+    if reason is None:
+        reason = (f"A töltő (<strong style=\"color:#e2e8f0;\">{cp_ocpp_id}</strong>) {WAITING_TIMEOUT_MINUTES} "
+                  f"percen belül nem kapott csatlakozást. A munkamenet automatikusan lezárult.")
     body = f"""
     <h2 style="margin:0 0 8px;font-size:20px;color:#f1f5f9;">Töltés nem indult el</h2>
     <p style="margin:0 0 20px;color:#94a3b8;font-size:14px;">
-      A töltő (<strong style="color:#e2e8f0;">{cp_ocpp_id}</strong>) {WAITING_TIMEOUT_MINUTES} percen belül
-      nem kapott csatlakozást. A munkamenet automatikusan lezárult.
+      {reason}
     </p>
 
     <div style="background:#0f172a;border:1px solid #92400e;border-radius:12px;padding:16px 24px;

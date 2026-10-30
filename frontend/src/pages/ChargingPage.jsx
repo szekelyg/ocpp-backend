@@ -51,6 +51,8 @@ function phaseof(session) {
     if (session.charge_point?.status === "charging") return "charging";
     return "connecting"; // StartTransaction megjött de fizikailag még nem tölt
   }
+  // Offline töltőre vár: a töltés net nélkül is folyhat, az elszámolás a töltő visszatérésekor
+  if (session.offline_wait) return "offline_wait";
   if ((session.duration_s ?? 0) >= WAITING_TIMEOUT_S) return "timeout";
   return "waiting";
 }
@@ -204,6 +206,17 @@ export default function ChargingPage() {
             <div className="font-semibold text-brand-amber">⏳ Várakozás az autóra</div>
             <div className="text-sm text-brand-amber/90 mt-0.5">
               Dugja be az autót a töltőbe a töltés megkezdéséhez.
+            </div>
+          </div>
+        )}
+        {phase === "offline_wait" && (
+          <div className="rounded-2xl border border-brand-yellow/60 bg-brand-cream px-4 py-3">
+            <div className="font-semibold text-brand-amber">📡 Megszakadt a kapcsolat a töltővel</div>
+            <div className="text-sm text-brand-amber/90 mt-0.5">
+              Megszakadt a kapcsolat a töltővel. A töltés ettől még folyhat. Az elszámolás akkor
+              készül el, amikor a töltő újra elérhető. Csak a ténylegesen felhasznált energiát vonjuk
+              le, legfeljebb a zárolt összeget. Ha a töltés nem indult el, a zárolást legkésőbb 24
+              órán belül feloldjuk.
             </div>
           </div>
         )}

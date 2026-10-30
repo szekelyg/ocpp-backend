@@ -4,9 +4,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime
 from typing import Dict, Tuple, Any, Optional
 
 from fastapi import WebSocket
+
+from app.ocpp.time_utils import utcnow
 
 logger = logging.getLogger("ocpp")
 
@@ -15,6 +18,10 @@ _ACTIVE_WS: Dict[str, WebSocket] = {}
 
 # cp_id -> az aktív kapcsolat Basic Auth-tal azonosította-e magát (OCPP Security Profile 2)
 _WS_AUTH: Dict[str, bool] = {}
+
+# cp_id -> mikor jött létre az aktív kapcsolat (UTC). Az offline töltőre
+# váró munkamenet ehhez méri a visszacsatlakozás utáni türelmi időt (pending_start.py).
+_CONNECTED_AT: Dict[str, datetime] = {}
 
 # cp_id -> counter (uniqueId generálás)
 _CP_MSG_COUNTER: Dict[str, int] = {}
@@ -29,6 +36,7 @@ async def register_ws(cp_id: str, ws: WebSocket, authenticated: bool = False) ->
     async with _REGISTRY_LOCK:
         _ACTIVE_WS[cp_id] = ws
         _WS_AUTH[cp_id] = bool(authenticated)
+        _CONNECTED_AT[cp_id] = utcnow()
 
 
 async def admit_ws(cp_id: str, ws: WebSocket, authenticated: bool) -> Tuple[bool, Optional[WebSocket]]:
@@ -47,6 +55,7 @@ async def admit_ws(cp_id: str, ws: WebSocket, authenticated: bool) -> Tuple[bool
             return False, None
         _ACTIVE_WS[cp_id] = ws
         _WS_AUTH[cp_id] = bool(authenticated)
+        _CONNECTED_AT[cp_id] = utcnow()
         return True, (old if old is not ws else None)
 
 
@@ -60,11 +69,18 @@ async def unregister_ws_if_same(cp_id: str, ws: WebSocket) -> None:
         if _ACTIVE_WS.get(cp_id) is ws:
             _ACTIVE_WS.pop(cp_id, None)
             _WS_AUTH.pop(cp_id, None)
+            _CONNECTED_AT.pop(cp_id, None)
 
 
 async def get_ws(cp_id: str) -> Optional[WebSocket]:
     async with _REGISTRY_LOCK:
         return _ACTIVE_WS.get(cp_id)
+
+
+async def connected_since(cp_id: str) -> Optional[datetime]:
+    """Az aktív kapcsolat létrejötte (UTC), None, ha a töltő nem csatlakozik."""
+    async with _REGISTRY_LOCK:
+        return _CONNECTED_AT.get(cp_id) if cp_id in _ACTIVE_WS else None
 
 
 async def connected_ids() -> list[str]:

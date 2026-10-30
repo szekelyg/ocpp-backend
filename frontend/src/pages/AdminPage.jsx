@@ -34,6 +34,10 @@ function fmtDate(iso) {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("hu-HU", { timeZone: "Europe/Budapest" });
 }
+// Offline töltőre váró munkamenet (backend: pending_start.offline_wait_info)
+function offlineWaitLabel(s) {
+  return `Offline-ra vár (zárolás tartva, legkésőbb ${fmtDt(s.offline_wait_until)}-ig)`;
+}
 function timeAgo(iso) {
   if (!iso) return "—";
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
@@ -336,7 +340,10 @@ function OverviewTab({ stats, sessions }) {
                 {activeSessions.map(s => (
                   <tr key={s.id} className="hover:bg-brand-panel">
                     <Td>{s.id}</Td>
-                    <Td><span className="font-mono text-xs">{s.charge_point_ocpp_id}</span></Td>
+                    <Td>
+                      <span className="font-mono text-xs">{s.charge_point_ocpp_id}</span>
+                      {s.offline_wait && <div className="mt-1"><Badge status="offline" label={offlineWaitLabel(s)} /></div>}
+                    </Td>
                     <Td>{s.anonymous_email || "—"}</Td>
                     <Td className="whitespace-nowrap">{fmtDt(s.started_at)}</Td>
                     <Td>{fmtDuration(s.duration_s)}</Td>
@@ -1166,7 +1173,7 @@ function SessionDetail({ s, apiFetch, toast, onRefresh }) {
           <div className="text-xs text-ink-muted mb-2">Műveletek</div>
           <div className="flex flex-wrap gap-2">
             {/* Indítás – kifizetett, de még el nem indult (függő) sessionre */}
-            {s.is_active && !s.ocpp_transaction_id && s.intent?.status === "paid" && (
+            {s.is_active && !s.ocpp_transaction_id && !s.offline_wait && s.intent?.status === "paid" && (
               <ActionBtn
                 color="emerald" label="Indítás újraküldése" busy={busy === "remotestart"}
                 title="RemoteStart újraküldése a töltőnek (pl. ha lejárt a töltő várakozási ideje, mielőtt az autót bedugták)"
@@ -1309,6 +1316,7 @@ function SessionsTab({ sessions, chargers, apiFetch, toast, onRefresh, highlight
           <Td>{fmtHuf(s.cost_huf)}</Td>
           <Td>
             {s.timed_out ? <Badge status="expired" label="timeout" /> :
+             s.offline_wait ? <Badge status="offline" label={offlineWaitLabel(s)} /> :
              s.is_active ? <Badge status="charging" label="aktív" /> :
              <Badge status="available" label="kész" />}
           </Td>
@@ -1619,7 +1627,8 @@ function SearchTab({ apiFetch, toast, onRefresh }) {
                         <div className="flex items-center gap-3">
                           <span className="font-mono text-ink-soft text-xs">#{s.id}</span>
                           <span className="font-mono text-xs text-ink-soft">{s.charge_point_ocpp_id}</span>
-                          {s.is_active ? <Badge status="charging" label="aktív" /> : <Badge status="available" label="kész" />}
+                          {s.offline_wait ? <Badge status="offline" label={offlineWaitLabel(s)} /> :
+                           s.is_active ? <Badge status="charging" label="aktív" /> : <Badge status="available" label="kész" />}
                           {missingInvoice && <span className="text-rose-600 text-xs font-semibold">Számla hiányzik!</span>}
                         </div>
                         {s.invoice_number && <span className="font-mono text-xs text-[#037a5c]">{s.invoice_number}</span>}

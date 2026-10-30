@@ -294,6 +294,10 @@ async def test_waiting_window_five_minutes_from_payment(monkeypatch):
     monkeypatch.setattr(main_mod, "_try_stripe_cancel_or_refund", fake_release)
     monkeypatch.setattr(email_mod, "send_no_start_email", fake_mail)
 
+    async def online(cp_id):
+        return object()   # a töltő csatlakozik (offline töltőnél várnánk: test_offline_wait.py)
+    monkeypatch.setattr(reg, "get_ws", online)
+
     assert WAITING_TIMEOUT_MINUTES == 5
     cp_id = await _cp()
     # 14 perce nyitotta a fizetést, de csak 1 perce fizetett → még vár

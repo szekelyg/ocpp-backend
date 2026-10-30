@@ -19,6 +19,7 @@ from app.ocpp.ocpp_utils import (
     MIN_CHARGE_HUF, _as_float, _as_int, _price_huf_per_kwh,
     effective_price_huf_per_kwh, effective_min_charge_huf,
 )
+from app.ocpp.handlers.pending_start import offline_start_in_window
 from app.services.email import send_receipt_email
 from app.services.invoice import create_session_invoice
 
@@ -75,6 +76,9 @@ async def start_transaction(cp_id: str, payload: dict) -> Optional[int]:
                 ]
                 if match_connector:
                     conds.append(ChargeSession.connector_id == connector_id)
+                else:
+                    # Offline töltőre váró munkamenethez csak ugyanarról a csatlakozóról kötünk
+                    conds.append(ChargeSession.offline_wait_since.is_(None))
                 res = await session.execute(
                     select(ChargeSession)
                     .where(and_(*conds))
@@ -84,6 +88,24 @@ async def start_transaction(cp_id: str, payload: dict) -> Optional[int]:
                 return res.scalar_one_or_none()
 
             existing = await _find_pending(match_connector=True) if connector_id is not None else None
+
+            # Offline töltőre váró munkamenet (pending_start.py): a visszacsatlakozáskor érkező,
+            # sorba állított StartTransaction csak akkor az övé, ha az időbélyege az ablakon belül
+            # van. Egy később helyben indított töltés valaki másé lehet → új munkamenet.
+            if existing is not None and existing.offline_wait_since is not None:
+                if offline_start_in_window(existing, ts):
+                    logger.warning(
+                        f"OfflineWait: session_id={existing.id} cp={cp_id} connector={connector_id} – "
+                        f"visszajött és indult (StartTransaction {ts.isoformat()}, fizetés "
+                        f"{existing.started_at.isoformat()}): a munkamenethez kötve"
+                    )
+                else:
+                    logger.warning(
+                        f"OfflineWait: StartTransaction az ablakon kívül: cp={cp_id} connector={connector_id} "
+                        f"ts={ts.isoformat()} vs. fizetés {existing.started_at.isoformat()} (session_id="
+                        f"{existing.id}) → NEM kötjük hozzá, új munkamenet"
+                    )
+                    existing = None
 
             if existing is None:
                 # Fallback: a töltő más csatlakozó-számot (vagy semmit) küldött, mint

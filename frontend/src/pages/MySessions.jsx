@@ -33,6 +33,7 @@ function fmtDuration(s) {
 const STATUS = {
   active: { label: "Folyamatban", cls: "badgeGood" },
   waiting: { label: "Autóra vár", cls: "badgeWarn" },
+  offline_wait: { label: "Töltőre vár", cls: "badgeWarn" },
   finished: { label: "Befejezve", cls: "badgeOk" },
   timed_out: { label: "Nem indult el", cls: "badgeMuted" },
 };
@@ -76,7 +77,7 @@ function SessionRow({ s, onInvoice, invoiceBusy }) {
           {s.invoice_number ? ` · Számla: ${s.invoice_number}` : ""}
         </span>
         <div className="flex gap-2">
-          {s.status === "active" || s.status === "waiting" ? (
+          {s.status === "active" || s.status === "waiting" || s.status === "offline_wait" ? (
             <Link to={`/charging/${s.id}`} className="btn btnPrimary !py-1.5 !px-3 !text-xs">
               Töltés megnyitása →
             </Link>

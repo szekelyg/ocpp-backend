@@ -24,6 +24,16 @@ Védelmek az automatikus újraküldésre (a kézi küldésre nem):
     RemoteStart után szokásos Preparing nem vált ki azonnali újraküldést).
 A számlálók processz-memóriában vannak (a munkamenet úgyis legfeljebb WAITING_TIMEOUT_MINUTES-ig függő;
 backend-újraindítás után a töltő újracsatlakozik, és a boot-ág újraküld).
+
+Offline töltőre várás (2026-10-30, Gellért döntése: „várjuk meg, amíg a töltő visszajön”):
+ha a töltő az engedély után elveszti a netet, a töltést helyben ettől még elindíthatja, a
+StartTransaction-t pedig csak visszacsatlakozáskor küldi el. Ezért ha az ablak úgy jár le, hogy
+a töltő offline, a main.py lejárati köre nem zár, hanem `offline_wait_since`-t állít, és:
+  - visszajön + megérkezik a sorba állított StartTransaction (időbélyege az ablakon belül,
+    ugyanarra a csatlakozóra) → transactions.start_transaction hozzáköti, a többi a szokásos;
+  - visszajön, de RECONNECT_GRACE_S alatt nem jön StartTransaction → lezárás + feloldás;
+  - OFFLINE_WAIT_MAX_HOURS a fizetéstől → lezárás + feloldás.
+Offline-ra váró munkamenetre RemoteStart nem megy (ablakon túl van: _not_pending_reason).
 """
 from __future__ import annotations
 
@@ -49,6 +59,14 @@ logger = logging.getLogger("ocpp")
 # a Stripe-zárolást. Közös forrás: main.py, és a töltő kötelező ConnectionTimeOut-ja
 # (required_config.py) is ebből jön (5 perc = 300 mp).
 WAITING_TIMEOUT_MINUTES = 5
+
+# Offline töltőre várás felső határa a fizetéstől. A Stripe manual-capture zárolás 7 napig
+# érvényes, a 24 óra ezen belül van: a capture a várakozás végén is sikerül.
+OFFLINE_WAIT_MAX_HOURS = 24
+# Visszacsatlakozás után ennyi ideig várunk a sorba állított StartTransaction-re.
+RECONNECT_GRACE_S = 120
+# A töltő órájának eltérése, amit a StartTransaction időbélyegénél még elfogadunk.
+OFFLINE_START_SKEW_S = 60
 
 MAX_AUTO_RETRIES = 3       # automatikus újraküldés munkamenetenként
 MIN_GAP_S = 20.0           # legalább ennyi mp két küldés között
@@ -87,6 +105,39 @@ def _aware(dt):
     return dt if dt is None or dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def offline_wait_deadline(cs: ChargeSession):
+    """Offline töltőre váró munkamenet végső határa (a fizetéstől OFFLINE_WAIT_MAX_HOURS).
+    A függő munkamenet started_at-ja a fizetés ideje (a StartTransaction írja át)."""
+    return _aware(cs.started_at) + timedelta(hours=OFFLINE_WAIT_MAX_HOURS)
+
+
+def is_offline_waiting(cs: ChargeSession) -> bool:
+    """Offline töltőre vár: lejárt az ablak a töltő offline állapotában, és még nem dőlt el."""
+    return cs.offline_wait_since is not None and cs.finished_at is None and cs.ocpp_transaction_id is None
+
+
+def offline_wait_info(cs: ChargeSession) -> dict:
+    """API-mezők (ügyfél-oldal, admin): offline-ra vár-e, és legkésőbb meddig tartjuk a zárolást."""
+    waiting = is_offline_waiting(cs)
+    return {"offline_wait": waiting,
+            "offline_wait_until": offline_wait_deadline(cs).isoformat() if waiting else None}
+
+
+def offline_start_in_window(cs: ChargeSession, ts) -> bool:
+    """Köthető-e egy (sorba állított) StartTransaction az offline-ra váró munkamenethez:
+    az időbélyege a fizetés és az ablak vége közé esik (kis óraeltéréssel). Egy később, helyben
+    indított tranzakció valaki másé lehet – azt nem számlázhatjuk az ügyfélnek."""
+    paid_at = _aware(cs.started_at)
+    skew = timedelta(seconds=OFFLINE_START_SKEW_S)
+    return paid_at - skew <= _aware(ts) <= paid_at + timedelta(minutes=WAITING_TIMEOUT_MINUTES) + skew
+
+
+async def charger_offline(cp: ChargePoint) -> bool:
+    """Offline a töltő: nincs WS-kapcsolata a registryben, vagy a compute_status szerint offline."""
+    from app.api.routers.charge_points import compute_status
+    return await registry.get_ws(cp.ocpp_id) is None or compute_status(cp) == "offline"
+
+
 def _not_pending_reason(cs: Optional[ChargeSession]) -> Optional[str]:
     """None, ha a munkamenet függő és kifizetett; különben a kihagyás oka."""
     if cs is None:
@@ -97,6 +148,8 @@ def _not_pending_reason(cs: Optional[ChargeSession]) -> Optional[str]:
         return "already_started"
     if cs.intent is None or cs.intent.status != "paid":
         return "not_paid"
+    if cs.offline_wait_since is not None:
+        return "offline_wait"  # az ablakon túl: RemoteStart már nem megy, a töltő jelentkezését várjuk
     if _aware(cs.started_at) < utcnow() - timedelta(minutes=_SESSION_MAX_AGE_MIN):
         return "expired"
     return None

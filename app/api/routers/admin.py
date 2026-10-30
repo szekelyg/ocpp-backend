@@ -18,7 +18,7 @@ from app.api.deps import get_db
 from app.db.models import ChargePoint, ChargeSession, ChargingIntent, Location
 from app.api.routers.charge_points import compute_status
 from app.services.auth_tokens import issue_intent_token
-from app.ocpp.handlers.pending_start import WAITING_TIMEOUT_MINUTES
+from app.ocpp.handlers.pending_start import WAITING_TIMEOUT_MINUTES, offline_wait_info
 from app.ocpp.required_config import REQUIRED_CONFIG, apply_required_config
 
 logger = logging.getLogger("admin")
@@ -149,6 +149,7 @@ def _session_dict(s: ChargeSession) -> dict:
         "finished_at": s.finished_at.isoformat() if s.finished_at else None,
         "is_active": s.finished_at is None,
         "timed_out": s.finished_at is not None and s.ocpp_transaction_id is None,
+        **offline_wait_info(s),
         "duration_s": _duration_s(s),
         "energy_kwh": s.energy_kwh,
         "cost_huf": s.cost_huf,
@@ -1164,6 +1165,7 @@ _REMOTE_START_SKIP_HINTS = {
     "finished": "A munkamenet már lezárult.",
     "already_started": "A töltés már elindult (megjött a StartTransaction).",
     "not_paid": "A munkamenethez nem tartozik kifizetett intent.",
+    "offline_wait": "A munkamenet offline töltőre vár (az ablakon túl) – a töltő jelentkezése dönt; lezárni a Force Close-zal lehet.",
     "expired": f"A munkamenet lejárt (a {WAITING_TIMEOUT_MINUTES} perces várakozási idő vége) – a zárolás feloldása folyamatban.",
 }
 

@@ -15,6 +15,7 @@ from app.api.deps import email_from_authorization, get_db
 from app.api.routers.admin import AdminPrincipal, verify_admin
 from app.db.models import ChargePoint, ChargeSession, ChargingIntent, MeterSample
 from app.ocpp.ocpp_ws import remote_start_transaction, remote_stop_transaction
+from app.ocpp.handlers.pending_start import offline_wait_info
 from app.ocpp.ocpp_utils import MIN_CHARGE_HUF, _price_huf_per_kwh
 from app.services.auth_tokens import verify_intent_token
 
@@ -135,6 +136,8 @@ def _session_to_dict(
         "min_charge_huf": MIN_CHARGE_HUF,
         "hold_amount_huf": hold_amount_huf,
         "phases": phases,
+        # Offline töltőre vár (a zárolás marad, az elszámolás a töltő visszatérésekor készül el)
+        **offline_wait_info(s),
     }
     if cp is not None:
         # Az ocpp_id / gyártó / típus nem megy ki (a töltő OCPP-azonosítója a kapcsolódás kulcsa).
