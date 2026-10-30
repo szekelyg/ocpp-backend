@@ -635,6 +635,8 @@ function ChargersTab({ chargers, apiFetch, toast, onRefresh }) {
   const [saveBusy, setSaveBusy] = useState(false);
   const [publishBusy, setPublishBusy] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(null);
+  const [unlockBusy, setUnlockBusy] = useState(null);
+  const [timeoutBusy, setTimeoutBusy] = useState(null);
 
   const STARTABLE = ["available", "preparing", "finishing"];
 
@@ -680,6 +682,45 @@ function ChargersTab({ chargers, apiFetch, toast, onRefresh }) {
       toast(`Reset hiba: ${e.message}`, "err");
     } finally {
       setResetBusy(null);
+    }
+  }
+
+  async function doUnlock(cp) {
+    const raw = window.prompt(`${cp.ocpp_id} – zár kioldása (UnlockConnector). Csatlakozó:`, "1");
+    if (raw === null) return; // mégse
+    setUnlockBusy(cp.id);
+    try {
+      await apiFetch(`/api/admin/charge-points/${cp.id}/unlock?connector_id=${encodeURIComponent(raw.trim() || "1")}`, { method: "POST" });
+      toast(`${cp.ocpp_id} zár kioldva`, "ok");
+    } catch (e) {
+      toast(`Zár kioldás hiba: ${e.message}`, "err");
+    } finally {
+      setUnlockBusy(null);
+    }
+  }
+
+  async function doConnectionTimeout(cp) {
+    const raw = window.prompt(
+      `${cp.ocpp_id} – várakozási idő (ConnectionTimeOut): ennyi mp-ig vár a töltő az autó bedugására a fizetés után. 60–900 mp:`,
+      "900"
+    );
+    if (raw === null) return; // mégse
+    setTimeoutBusy(cp.id);
+    try {
+      const res = await apiFetch(`/api/admin/charge-points/${cp.id}/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "ConnectionTimeOut", value: raw.trim() }),
+      });
+      toast(
+        res.ok ? `${cp.ocpp_id} várakozási idő: ${res.old ?? "?"} → ${res.new} mp (${res.status})`
+               : `${cp.ocpp_id} a töltő nem fogadta el: ${res.status}`,
+        res.ok ? "ok" : "err"
+      );
+    } catch (e) {
+      toast(`Várakozási idő hiba: ${e.message}`, "err");
+    } finally {
+      setTimeoutBusy(null);
     }
   }
 
@@ -833,6 +874,18 @@ function ChargersTab({ chargers, apiFetch, toast, onRefresh }) {
               busy={resetBusy === cp.id}
               onClick={() => doReset(cp, "Hard")}
               title="OCPP Hard Reset küldése"
+            />
+            <ActionBtn
+              label="Zár kioldása" color="amber"
+              busy={unlockBusy === cp.id}
+              onClick={() => doUnlock(cp)}
+              title="OCPP UnlockConnector – beragadt kábel kioldása"
+            />
+            <ActionBtn
+              label="Várakozási idő" color="blue"
+              busy={timeoutBusy === cp.id}
+              onClick={() => doConnectionTimeout(cp)}
+              title="ConnectionTimeOut: meddig vár a töltő az autó bedugására a fizetés után (60–900 mp)"
             />
             <ActionBtn
               label="GetConfig" color="blue"
@@ -1044,6 +1097,18 @@ function SessionDetail({ s, apiFetch, toast, onRefresh }) {
         <div className="border-t border-brand-line pt-3">
           <div className="text-xs text-ink-muted mb-2">Műveletek</div>
           <div className="flex flex-wrap gap-2">
+            {/* Indítás – kifizetett, de még el nem indult (függő) sessionre */}
+            {s.is_active && !s.ocpp_transaction_id && s.intent?.status === "paid" && (
+              <ActionBtn
+                color="emerald" label="Indítás újraküldése" busy={busy === "remotestart"}
+                title="RemoteStart újraküldése a töltőnek (pl. ha lejárt a töltő várakozási ideje, mielőtt az autót bedugták)"
+                onClick={() => doAction("remotestart", `/api/admin/sessions/${s.id}/remote-start`, "POST", {
+                  ok: "RemoteStart elküldve – a töltő elfogadta",
+                  err: e => `Indítás hiba: ${e.message}`,
+                })}
+              />
+            )}
+
             {/* OCPP Stop – csak aktív, OCPP sessionre */}
             {s.is_active && s.ocpp_transaction_id && (
               <ActionBtn

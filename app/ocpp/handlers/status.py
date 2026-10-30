@@ -26,6 +26,11 @@ async def save_status_notification(cp_id: str, payload: dict) -> None:
     try:
         incoming = _normalize_cp_status(payload.get("status"))
         connector_id = _as_int(payload.get("connectorId"))
+        error_code = payload.get("errorCode")
+        logger.info(
+            f"StatusNotification: cp={cp_id} connector={connector_id} status={payload.get('status')}"
+            + (f" errorCode={error_code}" if error_code and error_code != "NoError" else "")
+        )
 
         async with AsyncSessionLocal() as session:
             cp = (

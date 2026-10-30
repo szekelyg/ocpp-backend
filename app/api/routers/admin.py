@@ -18,6 +18,7 @@ from app.api.deps import get_db
 from app.db.models import ChargePoint, ChargeSession, ChargingIntent, Location
 from app.api.routers.charge_points import compute_status
 from app.services.auth_tokens import issue_intent_token
+from app.ocpp.handlers.pending_start import WAITING_TIMEOUT_MINUTES
 
 logger = logging.getLogger("admin")
 
@@ -659,6 +660,43 @@ async def admin_reset_cp(
         raise HTTPException(status_code=502, detail={"error": "ocpp_failed", "reason": str(e)})
 
 
+async def _require_online(ocpp_id: str) -> None:
+    """Érthető hiba, ha a töltő most nem csatlakozik (különben a küldés kivétellel bukna)."""
+    from app.ocpp.registry import get_ws
+    if await get_ws(ocpp_id) is None:
+        raise HTTPException(status_code=409, detail={
+            "error": "charger_offline",
+            "hint": f"A töltő ({ocpp_id}) most nem csatlakozik a backendhez – próbáld újra, ha visszajött."})
+
+
+@router.post("/charge-points/{cp_id}/unlock")
+async def admin_unlock_connector(
+    cp_id: int,
+    connector_id: int = Query(1, ge=1, le=10),
+    db: AsyncSession = Depends(get_db),
+    who: AdminPrincipal = Depends(verify_admin),
+):
+    """OCPP UnlockConnector – a beragadt kábel zárjának kioldása (válasz: Unlocked / UnlockFailed / NotSupported)."""
+    from app.ocpp.registry import send_call_and_wait
+    cp = (await db.execute(select(ChargePoint).where(ChargePoint.id == cp_id))).scalar_one_or_none()
+    if not cp:
+        raise HTTPException(status_code=404, detail="ChargePoint not found")
+    await _require_online(cp.ocpp_id)
+    try:
+        res = await send_call_and_wait(cp.ocpp_id, "UnlockConnector", {"connectorId": connector_id}, timeout_s=15)
+    except Exception as e:
+        logger.warning("admin_unlock cp=%s connector=%s HIBA %r by=%s", cp.ocpp_id, connector_id, e, who.label)
+        raise HTTPException(status_code=502, detail={
+            "error": "ocpp_failed", "reason": str(e), "hint": "A töltő nem válaszolt az UnlockConnector parancsra."})
+    status_ = (res or {}).get("status", "Unknown")
+    logger.warning("admin_unlock cp=%s connector=%s status=%s by=%s", cp.ocpp_id, connector_id, status_, who.label)
+    if status_ != "Unlocked":
+        raise HTTPException(status_code=409, detail={
+            "error": "unlock_failed", "ocpp": res,
+            "hint": f"A töltő nem oldotta ki a zárat (válasz: {status_})."})
+    return {"ok": True, "ocpp_id": cp.ocpp_id, "connector_id": connector_id, "ocpp": res}
+
+
 @router.get("/charge-points/{cp_id}/config")
 async def admin_get_cp_config(
     cp_id: int,
@@ -681,7 +719,7 @@ async def admin_get_cp_config(
 #
 # A korábbi, hitelesítés nélküli change-config végpont megszűnt; ez az admin-only utód, de
 # CSAK engedélyezett kulcsokra. Most: az áramkorlát-kulcsok (egész amper, 6..CurrentLimitHardware,
-# a töltőből visszaolvasva). A hitelesítési bevezetés kulcsai (OCPPBackendJSONURL,
+# a töltőből visszaolvasva), a ConnectionTimeOut (60 mp – a függő munkamenet lejárata) és a rögzített értékű kulcsok. A hitelesítési bevezetés kulcsai (OCPPBackendJSONURL,
 # AuthorizationKey, offline-kulcsok) szándékosan NEM szerepelnek – azok külön, jóváhagyott
 # lépések (docs/OCPP-HITELESITES.md).
 
@@ -697,12 +735,37 @@ CONFIG_FIXED_VALUE_KEYS = {
 }
 
 
-async def _change_fixed_value_key(cp_id: int, key: str, value: str, db: AsyncSession, who) -> dict:
-    from app.ocpp.registry import change_configuration, send_call_and_wait
+# Egész értékű kulcsok tartománnyal (a töltőből visszaolvasott régi értéket naplózzuk).
+# ConnectionTimeOut: ennyi mp-ig vár a töltő az autó bedugására egy engedélyezett indítás
+# (RemoteStart) után. A norg_onk_2-n 60 mp volt (2026-10-28), a többin 180. Felső határ: a
+# függő munkamenet lejárata – így a töltő a fizetés utáni teljes ablakban várhat a bedugásra.
+CONFIG_RANGE_KEYS = {
+    "ConnectionTimeOut": (60, WAITING_TIMEOUT_MINUTES * 60),
+}
 
+CONFIG_ALLOWED_KEYS = sorted(CONFIG_CURRENT_LIMIT_KEYS | set(CONFIG_FIXED_VALUE_KEYS) | set(CONFIG_RANGE_KEYS))
+
+
+async def _change_fixed_value_key(cp_id: int, key: str, value: str, db: AsyncSession, who) -> dict:
     if value != CONFIG_FIXED_VALUE_KEYS[key]:
         raise HTTPException(status_code=422, detail={
             "error": "value_not_allowed", "allowed": CONFIG_FIXED_VALUE_KEYS[key]})
+    return await _read_change_log(cp_id, key, value, db, who)
+
+
+async def _change_range_key(cp_id: int, key: str, raw: str, db: AsyncSession, who) -> dict:
+    lo, hi = CONFIG_RANGE_KEYS[key]
+    if not raw.isdigit() or not (lo <= int(raw) <= hi):
+        raise HTTPException(status_code=422, detail={
+            "error": "value_out_of_range", "min": lo, "max": hi,
+            "hint": f"A {key} értéke egész szám {lo} és {hi} között."})
+    return await _read_change_log(cp_id, key, str(int(raw)), db, who)
+
+
+async def _read_change_log(cp_id: int, key: str, value: str, db: AsyncSession, who) -> dict:
+    """Régi érték kiolvasása, ChangeConfiguration, régi → új érték naplózása a töltő válaszával."""
+    from app.ocpp.registry import change_configuration, send_call_and_wait
+
     cp = (await db.execute(select(ChargePoint).where(ChargePoint.id == cp_id))).scalar_one_or_none()
     if not cp:
         raise HTTPException(status_code=404, detail="ChargePoint not found")
@@ -740,10 +803,10 @@ async def admin_change_cp_config(
     key = (body.key or "").strip()
     if key in CONFIG_FIXED_VALUE_KEYS:
         return await _change_fixed_value_key(cp_id, key, (body.value or "").strip(), db, who)
+    if key in CONFIG_RANGE_KEYS:
+        return await _change_range_key(cp_id, key, (body.value or "").strip(), db, who)
     if key not in CONFIG_CURRENT_LIMIT_KEYS:
-        raise HTTPException(status_code=400, detail={
-            "error": "key_not_allowed",
-            "allowed": sorted(CONFIG_CURRENT_LIMIT_KEYS | set(CONFIG_FIXED_VALUE_KEYS))})
+        raise HTTPException(status_code=400, detail={"error": "key_not_allowed", "allowed": CONFIG_ALLOWED_KEYS})
     raw = (body.value or "").strip()
     if not raw.isdigit():
         raise HTTPException(status_code=422, detail={"error": "value_must_be_integer_amps"})
@@ -1033,7 +1096,7 @@ async def admin_list_sessions(
 async def admin_stop_session(
     session_id: int,
     db: AsyncSession = Depends(get_db),
-    _: AdminPrincipal = Depends(verify_admin),
+    who: AdminPrincipal = Depends(verify_admin),
 ):
     """OCPP RemoteStop – töltő online kell hozzá."""
     from app.ocpp.ocpp_ws import remote_stop_transaction
@@ -1041,17 +1104,62 @@ async def admin_stop_session(
     if s.finished_at is not None:
         return {"ok": True, "already_finished": True}
     if not s.ocpp_transaction_id:
-        raise HTTPException(status_code=409, detail={"error": "no_ocpp_transaction_id"})
+        raise HTTPException(status_code=409, detail={
+            "error": "no_ocpp_transaction_id",
+            "hint": "A töltés még nem indult el (nincs tranzakció) – leállítani nem lehet, lezárni a Force Close-zal."})
+    ocpp_id = str(s.charge_point.ocpp_id)
+    await _require_online(ocpp_id)
     try:
-        ocpp_res = await remote_stop_transaction(
-            cp_id=str(s.charge_point.ocpp_id),
-            transaction_id=s.ocpp_transaction_id,
-        )
+        ocpp_res = await remote_stop_transaction(cp_id=ocpp_id, transaction_id=s.ocpp_transaction_id)
     except Exception as e:
+        logger.warning("admin_stop session=%s cp=%s HIBA %r by=%s", s.id, ocpp_id, e, who.label)
         raise HTTPException(status_code=502, detail={"error": "ocpp_remote_stop_failed", "reason": str(e)})
+    logger.warning("admin_stop session=%s cp=%s tx=%s ocpp=%s by=%s",
+                   s.id, ocpp_id, s.ocpp_transaction_id, ocpp_res, who.label)
     if (ocpp_res or {}).get("status") not in ("Accepted", "accepted"):
-        raise HTTPException(status_code=409, detail={"error": "remote_stop_rejected", "ocpp": ocpp_res})
+        raise HTTPException(status_code=409, detail={
+            "error": "remote_stop_rejected", "ocpp": ocpp_res, "hint": "A töltő elutasította a leállítást."})
     return {"ok": True, "ocpp": ocpp_res}
+
+
+# Miért nem küldhető a RemoteStart (pending_start.retry_remote_start „skipped" okai)
+_REMOTE_START_SKIP_HINTS = {
+    "not_found": "Nincs ilyen munkamenet.",
+    "finished": "A munkamenet már lezárult.",
+    "already_started": "A töltés már elindult (megjött a StartTransaction).",
+    "not_paid": "A munkamenethez nem tartozik kifizetett intent.",
+    "expired": "A munkamenet lejárt (a 15 perces várakozási idő vége) – a zárolás feloldása folyamatban.",
+}
+
+
+@router.post("/sessions/{session_id}/remote-start")
+async def admin_remote_start_session(
+    session_id: int,
+    db: AsyncSession = Depends(get_db),
+    who: AdminPrincipal = Depends(verify_admin),
+):
+    """RemoteStartTransaction újraküldése egy kifizetett, de el nem indult munkamenetre
+    (ugyanaz a függvény, mint a Preparing-re / újracsatlakozásra történő automatikus újraküldés)."""
+    from app.ocpp.handlers.pending_start import retry_remote_start
+    s = await _load_session(db, session_id)
+    if s.finished_at is None and s.ocpp_transaction_id is None and s.charge_point:
+        await _require_online(s.charge_point.ocpp_id)
+    out = await retry_remote_start(session_id, reason="admin", manual=True)
+    logger.warning("admin_remote_start session=%s intent=%s cp=%s skipped=%s ocpp=%s by=%s",
+                   session_id, out["intent_id"], out["cp"], out["skipped"], out["ocpp"], who.label)
+    if out["skipped"]:
+        raise HTTPException(status_code=409, detail={
+            "error": out["skipped"], "hint": _REMOTE_START_SKIP_HINTS.get(out["skipped"], out["skipped"])})
+    status_ = (out["ocpp"] or {}).get("status")
+    if status_ == "Error":
+        raise HTTPException(status_code=502, detail={
+            "error": "ocpp_remote_start_failed", "ocpp": out["ocpp"],
+            "hint": f"A töltő nem válaszolt a RemoteStartra ({(out['ocpp'] or {}).get('reason')})."})
+    if status_ != "Accepted":
+        raise HTTPException(status_code=409, detail={
+            "error": "remote_start_rejected", "ocpp": out["ocpp"],
+            "hint": f"A töltő elutasította az indítást (válasz: {status_})."})
+    return {"ok": True, "session_id": session_id, "intent_id": out["intent_id"], "ocpp": out["ocpp"]}
 
 
 @router.post("/sessions/{session_id}/force-close")

@@ -24,6 +24,8 @@ from app.core.rate_limit import RateLimitMiddleware
 from app.ocpi.router import router as ocpi_router
 from app.ocpi.errors import add_ocpi_exception_handlers
 from app.ocpp.ocpp_ws import handle_ocpp
+# A függő (kifizetett, el nem indult) munkamenet lejárata – közös forrás: pending_start
+from app.ocpp.handlers.pending_start import WAITING_TIMEOUT_MINUTES as _WAITING_TIMEOUT_MINUTES
 
 logger = logging.getLogger("backend")
 logging.basicConfig(level=logging.INFO)
@@ -33,7 +35,6 @@ logging.getLogger("ocpp").setLevel(logging.DEBUG)
 # Waiting session timeout background task
 # ---------------------------------------------------------------------------
 
-_WAITING_TIMEOUT_MINUTES = 15
 # Ha a töltő ennyi perce nem jelentkezett (last_seen_at), de van nyitott charging session,
 # akkor azt lezárjuk (a töltő kiesett, és StopTransaction soha nem érkezett).
 _CHARGING_STALE_CP_MINUTES = 30

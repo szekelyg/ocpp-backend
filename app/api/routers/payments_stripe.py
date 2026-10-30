@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import ChargePoint, ChargeSession, ChargingIntent
 from app.db.session import AsyncSessionLocal
-from app.ocpp.registry import remote_start_transaction
+from app.ocpp.handlers.pending_start import send_remote_start
 from app.ocpp.time_utils import utcnow
 from app.services.auth_tokens import issue_intent_token
 from app.services.email import send_charging_started_email
@@ -228,16 +228,11 @@ async def _ensure_session_and_remote_start(db: AsyncSession, intent: ChargingInt
         )
         return {"session_id": cs.id, "created": True, "remote_start": "skipped_no_cp"}
 
-    try:
-        ocpp_res = await remote_start_transaction(
-            cp_id=str(cp.ocpp_id),
-            connector_id=int(intent.connector_id),
-            id_tag="ANON",
-        )
-        logger.info(f"RemoteStart result: intent_id={intent.id} session_id={cs.id} ocpp={ocpp_res}")
-    except Exception as e:
-        logger.exception(f"RemoteStart failed: intent_id={intent.id} session_id={cs.id} err={e}")
-        ocpp_res = {"status": "Error", "reason": str(e)}
+    # Az első küldés is a közös függvényen megy: naplózva, és az időpontja számít az
+    # automatikus újraküldés (Preparing / reconnect) minimális szünetébe.
+    ocpp_res = await send_remote_start(
+        str(cp.ocpp_id), cs.id, intent.id, int(intent.connector_id), reason="payment",
+    )
 
     await send_charging_started_email(
         to=intent.anonymous_email,

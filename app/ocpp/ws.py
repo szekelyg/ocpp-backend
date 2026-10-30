@@ -10,6 +10,7 @@ from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
 from app.ocpp.parsers import extract_cp_id_from_boot
+from app.ocpp.ocpp_utils import _as_int
 from app.ocpp.time_utils import iso_utc_now_z
 from app.ocpp.registry import (
     admit_ws,
@@ -24,7 +25,7 @@ from app.ocpp.handlers.heartbeat import touch_last_seen
 from app.ocpp.handlers.status import save_status_notification
 from app.ocpp.handlers.transactions import start_transaction, stop_transaction
 from app.ocpp.handlers.meter import save_meter_values
-from app.ocpp.handlers.reconnect import retry_pending_remote_start
+from app.ocpp.handlers.pending_start import retry_on_preparing, retry_pending_remote_start
 from app.services.load_balance import rebalance_for_cp
 
 logger = logging.getLogger("ocpp")
@@ -263,6 +264,11 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
                 await save_status_notification(cp_id, payload)
                 response = [3, unique_id, {}]
                 await ws.send_text(json.dumps(response))
+                # Bedugott autó / újrapróbálás: ha van függő, kifizetett munkamenet ezen a
+                # csatlakozón, a RemoteStart újraküldése (nem blokkol – a töltő válasza
+                # ezen a cikluson érkezik vissza)
+                if payload.get("status") == "Preparing":
+                    asyncio.create_task(retry_on_preparing(cp_id, _as_int(payload.get("connectorId"))))
 
             elif action == "FirmwareStatusNotification":
                 await touch_last_seen(cp_id)
