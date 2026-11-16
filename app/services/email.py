@@ -51,6 +51,26 @@ def _base_url() -> str:
     return os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
 
 
+async def _charger_name(cp_ocpp_id: str) -> str:
+    """A sofőrnek szóló levélben a töltő a HELYSZÍN nevével szerepel. A belső OCPP-azonosító
+    (a töltő „felhasználóneve" az OCPP-kapcsolatban) nem megy ki – a publikus töltőlista mintájára."""
+    from sqlalchemy import select
+    import app.db.session as db_session
+    from app.db.models import ChargePoint, Location
+
+    try:
+        async with db_session.AsyncSessionLocal() as s:
+            name = (await s.execute(
+                select(Location.name)
+                .join(ChargePoint, ChargePoint.location_id == Location.id)
+                .where(ChargePoint.ocpp_id == cp_ocpp_id)
+            )).scalars().first()
+    except Exception:
+        logger.exception("Helyszín-név lekérdezése sikertelen")
+        name = None
+    return name or "—"
+
+
 # ---------------------------------------------------------------------------
 # Email sablonok
 # ---------------------------------------------------------------------------
@@ -135,6 +155,7 @@ async def send_charging_started_email(
     A linkben utazik az intent-token is: a töltési oldal ezzel tudja leállítani a
     töltést (POST /api/sessions/{id}/stop csak az indítónak engedi).
     """
+    charger = await _charger_name(cp_ocpp_id)
     session_url = f"{_base_url()}/charging/{session_id}"
     if intent_token:
         session_url += f"?t={intent_token}"
@@ -142,12 +163,12 @@ async def send_charging_started_email(
     body = f"""
     <h2 style="margin:0 0 8px;font-size:20px;color:#f1f5f9;">Töltés elindult</h2>
     <p style="margin:0 0 20px;color:#94a3b8;font-size:14px;">
-      A töltő (<strong style="color:#e2e8f0;">{escape(cp_ocpp_id)}</strong>) fogadta a kérést.
+      A töltő (<strong style="color:#e2e8f0;">{escape(charger)}</strong>) fogadta a kérést.
       Ha az autó már be van dugva, a töltés azonnal indul – egyébként csatlakoztassa most.
     </p>
 
     <table cellpadding="0" cellspacing="0" style="width:100%;">
-      {_stat("Töltő azonosító", cp_ocpp_id)}
+      {_stat("Töltő", charger)}
       {_stat("Session ID", str(session_id))}
     </table>
 
@@ -176,8 +197,9 @@ async def send_no_start_email(
     reason: a lezárás oka, ha nem az alapeset (az autó nem csatlakozott időben), hanem pl. a
     töltő offline volt (main.py lejárati köre, offline-ra váró munkamenet)."""
     from app.ocpp.handlers.pending_start import WAITING_TIMEOUT_MINUTES
+    charger = await _charger_name(cp_ocpp_id)
     if reason is None:
-        reason = (f"A töltő (<strong style=\"color:#e2e8f0;\">{escape(cp_ocpp_id)}</strong>) {WAITING_TIMEOUT_MINUTES} "
+        reason = (f"A töltő (<strong style=\"color:#e2e8f0;\">{escape(charger)}</strong>) {WAITING_TIMEOUT_MINUTES} "
                   f"percen belül nem kapott csatlakozást. A munkamenet automatikusan lezárult.")
     body = f"""
     <h2 style="margin:0 0 8px;font-size:20px;color:#f1f5f9;">Töltés nem indult el</h2>
@@ -197,7 +219,7 @@ async def send_no_start_email(
     </div>
 
     <table cellpadding="0" cellspacing="0" style="width:100%;">
-      {_stat("Töltő azonosító", cp_ocpp_id)}
+      {_stat("Töltő", charger)}
       {_stat("Session ID", str(session_id))}
     </table>
     """
@@ -226,6 +248,7 @@ async def send_receipt_email(
     billing_country: Optional[str] = None,
 ) -> bool:
     """Töltés befejezve – bizonylat."""
+    charger = await _charger_name(cp_ocpp_id)
 
     def fmt_duration(s: Optional[int]) -> str:
         if not s:
@@ -281,7 +304,7 @@ async def send_receipt_email(
            style="width:100%;background:#0f172a;border:1px solid #334155;
                   border-radius:12px;padding:4px 16px;">
       <tbody>
-        {_stat("Töltő", cp_ocpp_id)}
+        {_stat("Töltő", charger)}
         {_stat("Session ID", str(session_id))}
         {_stat("Időtartam", fmt_duration(duration_s))}
         {_stat("Energia", energy_str)}

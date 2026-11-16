@@ -175,18 +175,50 @@ def sent_emails(monkeypatch):
     return sent
 
 
+async def _helyszin(ocpp_id, name):
+    """Töltő saját nevű helyszínnel (a levelek ezt mutatják a sofőrnek)."""
+    from sqlalchemy import select, update
+    from app.db.models import ChargePoint, Location
+    from tests.conftest import TestSession
+
+    cp_id, _ = await _cp(ocpp_id)
+    async with TestSession() as s:
+        loc_id = select(ChargePoint.location_id).where(ChargePoint.id == cp_id).scalar_subquery()
+        await s.execute(update(Location).where(Location.id == loc_id).values(name=name))
+        await s.commit()
+
+
 async def test_email_ugyfel_adat_html_escape(sent_emails):
     from app.services import email
 
     evil = '<img src=x onerror=alert(1)> & "Fia"'
+    await _helyszin("ESC-1", evil)
     await email.send_receipt_email(
-        to="a@b.hu", session_id=1, cp_ocpp_id=evil, energy_kwh=1.0, cost_huf=170,
+        to="a@b.hu", session_id=1, cp_ocpp_id="ESC-1", energy_kwh=1.0, cost_huf=170,
         billing_name=evil, billing_type="business", billing_company=evil, billing_tax_number=evil,
         billing_street=evil, billing_zip=evil, billing_city=evil, billing_country=evil,
     )
-    await email.send_charging_started_email(to="a@b.hu", session_id=1, cp_ocpp_id=evil, intent_token='t"><b>')
-    await email.send_no_start_email(to="a@b.hu", session_id=1, cp_ocpp_id=evil)
+    await email.send_charging_started_email(to="a@b.hu", session_id=1, cp_ocpp_id="ESC-1", intent_token='t"><b>')
+    await email.send_no_start_email(to="a@b.hu", session_id=1, cp_ocpp_id="ESC-1")
     assert len(sent_emails) == 3
     for html in sent_emails:
         assert "<img" not in html and "<b>" not in html
+        assert "&lt;img src=x" in html                    # a helyszín neve is escape-elve
     assert sent_emails[0].count("&lt;img src=x onerror=alert(1)&gt; &amp; &quot;Fia&quot;") >= 4
+
+
+# ── 7. A töltő belső OCPP-azonosítója nem megy ki a sofőrnek szóló levelekben ──
+
+async def test_email_helyszin_nev_az_ocpp_azonosito_helyett(sent_emails):
+    from app.services import email
+
+    await _helyszin("nadudvar_belso_2", "Nádudvar, SPAR parkoló")
+    for cp in ("nadudvar_belso_2", "nincs_ilyen_tolto"):
+        await email.send_charging_started_email(to="a@b.hu", session_id=1, cp_ocpp_id=cp)
+        await email.send_no_start_email(to="a@b.hu", session_id=1, cp_ocpp_id=cp)
+        await email.send_receipt_email(to="a@b.hu", session_id=1, cp_ocpp_id=cp)
+    assert len(sent_emails) == 6
+    for html in sent_emails:
+        assert "nadudvar_belso_2" not in html and "nincs_ilyen_tolto" not in html
+    for html in sent_emails[:3]:
+        assert "Nádudvar, SPAR parkoló" in html
