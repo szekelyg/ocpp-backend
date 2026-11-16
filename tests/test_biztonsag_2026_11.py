@@ -251,3 +251,78 @@ async def test_biztonsagi_fejlecek_minden_valaszon(client, monkeypatch):
             "img-src 'self' data: https://*.tile.openstreetmap.org; frame-ancestors 'none'")
     rate_limit.STORE.clear()
     keycloak.reset_cache()
+
+
+# ── 10. Apróságok ─────────────────────────────────────────────────────────────
+
+async def _futo_munkamenet(ocpp_id):
+    """Fizetett, futó munkamenet → (session_id, intent_id)."""
+    from app.db.models import ChargeSession, ChargingIntent
+    from app.ocpp.time_utils import utcnow
+    from tests.conftest import TestSession
+
+    cp_id, _ = await _cp(ocpp_id)
+    async with TestSession() as s:
+        intent = ChargingIntent(charge_point_id=cp_id, connector_id=1, anonymous_email="v@example.hu",
+                                status="paid", hold_amount_huf=5000, expires_at=utcnow())
+        s.add(intent)
+        await s.flush()
+        cs = ChargeSession(charge_point_id=cp_id, connector_id=1, ocpp_transaction_id="TX-1",
+                           started_at=utcnow(), anonymous_email="v@example.hu", intent_id=intent.id)
+        s.add(cs)
+        await s.commit()
+        return cs.id, intent.id
+
+
+async def test_publikus_stop_nem_arulja_el_letezik_e_a_munkamenet(client):
+    sid, _ = await _futo_munkamenet("STOP-403")
+    idegen = await client.post(f"/api/sessions/{sid}/stop")
+    nincs = await client.post("/api/sessions/999999/stop")
+    assert idegen.status_code == nincs.status_code == 403
+    assert idegen.json() == nincs.json()
+
+
+async def test_publikus_stop_hibaja_nem_szivarogtat_toltoazonositot(client):
+    """Offline töltőnél a hiba szövege („Nincs aktív WS kapcsolat ehhez a töltőhöz: <ocpp_id>") ment ki."""
+    from app.services.auth_tokens import issue_intent_token
+
+    sid, intent_id = await _futo_munkamenet("belso_ocpp_azonosito_7")
+    r = await client.post(f"/api/sessions/{sid}/stop", json={"token": issue_intent_token(intent_id)})
+    assert r.status_code == 502
+    assert r.json()["detail"]["error"] == "ocpp_remote_stop_failed" and r.json()["detail"]["hint"]
+    assert "belso_ocpp_azonosito_7" not in r.text and "reason" not in r.json()["detail"]
+
+
+async def test_stripe_hibaszoveg_nem_megy_az_ugyfelnek(client, monkeypatch):
+    import app.api.routers.intents as intents_mod
+
+    def _fail(**params):
+        raise RuntimeError("Invalid API Key provided: sk_live_titkos_reszlet")
+
+    monkeypatch.setattr(intents_mod.stripe.checkout.Session, "create", _fail)
+    _, pid = await _cp("STRIPE-ERR")
+    r = await client.post("/api/intents/", json={
+        "charge_point_id": pid, "email": "u@example.hu", "hold_amount_huf": 5000, **BILLING})
+    assert r.status_code == 502
+    assert r.json()["detail"]["error"] == "stripe_checkout_create_failed" and r.json()["detail"]["hint"]
+    assert "sk_live" not in r.text and "Invalid API Key" not in r.text
+
+
+async def test_webhook_nem_naplozza_a_titok_elejet(client, caplog):
+    import logging
+
+    with caplog.at_level(logging.DEBUG):
+        r = await client.post("/api/payments/stripe/webhook", content=b"{}",
+                              headers={"Stripe-Signature": "t=%d,v1=%s" % (__import__("time").time(), "0" * 64)})
+    assert r.status_code == 400
+    assert "whsec_" not in caplog.text and "secret_prefix" not in caplog.text
+
+
+def test_alembic_ini_nem_tartalmaz_jelszot():
+    """Az alembic/env.py a DATABASE_URL-ből dolgozik; az ini-ben csak helyőrző lehet."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    urls = [line for line in (root / "alembic.ini").read_text().splitlines() if line.startswith("sqlalchemy.url")]
+    assert urls == ["sqlalchemy.url = driver://user:pass@localhost/dbname"]
+    assert 'config.set_main_option("sqlalchemy.url", get_migration_url())' in (root / "alembic" / "env.py").read_text()

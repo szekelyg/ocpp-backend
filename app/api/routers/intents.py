@@ -291,9 +291,13 @@ async def create_intent(
             await db.commit()
         except Exception:
             await db.rollback()
+        # A Stripe hibaszövege (kulcs-/fiókrészletek lehetnek benne) csak a naplóba megy (fent).
         raise HTTPException(
             status_code=502,
-            detail={"error": "stripe_checkout_create_failed", "reason": str(e)},
+            detail={
+                "error": "stripe_checkout_create_failed",
+                "hint": "A fizetés indítása most nem sikerült. Kérjük, próbálja újra néhány perc múlva.",
+            },
         )
 
     # 4) Intent frissítés (CSAK létező oszlopok)

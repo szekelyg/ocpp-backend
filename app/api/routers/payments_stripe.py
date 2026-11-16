@@ -81,9 +81,7 @@ def _verify_stripe_signature(payload: bytes, sig_header: str, secret: str, toler
         raise HTTPException(status_code=400, detail="stripe_signature_timestamp_out_of_tolerance")
 
     expected = _compute_v1(secret, ts, payload)
-    match = any(hmac.compare_digest(expected, v1) for v1 in v1_list)
-    logger.debug(f"STRIPE_SIG_DEBUG: expected_prefix={expected[:16]!r} match={match} secret_prefix={secret[:12]!r}")
-    if not match:
+    if not any(hmac.compare_digest(expected, v1) for v1 in v1_list):
         logger.error("STRIPE_SIG_FAIL: HMAC mismatch")
         raise HTTPException(status_code=400, detail="invalid_stripe_signature")
 

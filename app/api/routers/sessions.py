@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -18,6 +19,8 @@ from app.ocpp.ocpp_ws import remote_start_transaction, remote_stop_transaction
 from app.ocpp.handlers.pending_start import offline_wait_info
 from app.ocpp.ocpp_utils import MIN_CHARGE_HUF, _price_huf_per_kwh
 from app.services.auth_tokens import verify_intent_token
+
+logger = logging.getLogger("sessions")
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -484,10 +487,9 @@ async def stop_session_public(
         .where(ChargeSession.id == session_id)
     )
     s = res.scalar_one_or_none()
-    if not s:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    if not await _may_stop_session(s, body, authorization, db):
+    # Nem létező munkamenetre ugyanaz a 403, mint idegenre (ahogy a GET-nél): a sorszámos
+    # azonosítóból ne derüljön ki, melyik munkamenet létezik.
+    if not s or not await _may_stop_session(s, body, authorization, db):
         raise HTTPException(
             status_code=403,
             detail={
@@ -517,8 +519,16 @@ async def stop_session_public(
             cp_id=str(s.charge_point.ocpp_id),
             transaction_id=s.ocpp_transaction_id,
         )
-    except Exception as e:
-        raise HTTPException(status_code=502, detail={"error": "ocpp_remote_stop_failed", "reason": str(e)})
+    except Exception:
+        # A hiba szövegében a töltő OCPP-azonosítója is benne lehet – az ügyfél általános üzenetet kap.
+        logger.exception("publikus stop: RemoteStop sikertelen session_id=%s", s.id)
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "ocpp_remote_stop_failed",
+                "hint": "A töltő most nem érhető el. Kérjük, állítsa le a töltést a töltőn vagy az autóban.",
+            },
+        )
 
     ocpp_status = (ocpp_res or {}).get("status")
     if ocpp_status not in ("Accepted", "accepted"):
