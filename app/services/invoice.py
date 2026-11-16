@@ -17,6 +17,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from typing import Optional
+from xml.sax.saxutils import escape as _xml
 
 logger = logging.getLogger("invoice")
 
@@ -182,13 +183,16 @@ async def create_session_invoice(
         city = buyer_city or ""
         zip_code = buyer_zip or ""
 
+        # A szamlazz.py escape NÉLKÜL illeszti a mezőket az XML-sablonba (jinja2, autoescape
+        # nélkül): a vevő által beírt szöveget itt kell escape-elni – különben egy „Kovács & Fia Bt."
+        # érvénytelen XML-t ad (nincs számla), egy „</nev>…" pedig a vevő-blokk elemeit írná felül.
         buyer = Buyer(
-            name=name,
-            zip_code=zip_code,
-            city=city,
-            address=address_parts or "-",
-            email=buyer_email,
-            tax_number=buyer_tax_number or "",
+            name=_xml(name),
+            zip_code=_xml(zip_code),
+            city=_xml(city),
+            address=_xml(address_parts or "-"),
+            email=_xml(buyer_email),
+            tax_number=_xml(buyer_tax_number or ""),
             tax_subject=_tax_subject(billing_type, buyer_tax_number),
             send_email=True,
         )
@@ -211,7 +215,7 @@ async def create_session_invoice(
         gross_total = round(net_total + vat_amount, 2)
 
         item = Item(
-            name=f"Elektromos töltési szolgáltatás – {cp_ocpp_id}",
+            name=_xml(f"Elektromos töltési szolgáltatás – {cp_ocpp_id}"),
             quantity=str(quantity),
             quantity_unit=unit,
             unit_price=str(net_unit),

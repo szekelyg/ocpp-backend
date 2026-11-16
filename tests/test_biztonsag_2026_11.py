@@ -122,3 +122,38 @@ async def test_indulaskor_figyelmeztet_ha_nincs_auth_secret(auth_secret, warns, 
         async with lifespan(app):
             pass
     assert any("AUTH_SECRET NINCS beállítva" in r.getMessage() for r in caplog.records) is warns
+
+
+# ── 5. Számlázz.hu: a vevő adatai escape-elve kerülnek az XML-be ──────────────
+
+async def test_szamla_xml_vevo_adatok_escape(monkeypatch):
+    """A szamlazz.py nem escape-el: „Kovács & Fia" érvénytelen XML-t adott (a számla soha nem
+    készült el), egy „</nev><adoszam>…" pedig felülírhatta a vevő-blokk elemeit."""
+    import xml.etree.ElementTree as ET
+    import szamlazz.client as szamlazz_client
+    from app.services import invoice
+
+    sent = []
+
+    def _fake_post(url, files):
+        sent.append(files["action-xmlagentxmlfile"])
+        raise RuntimeError("a teszt nem megy ki a hálózatra")
+
+    monkeypatch.setenv("SZAMLAZZ_AGENT_KEY", "teszt-kulcs")
+    monkeypatch.setattr(szamlazz_client.requests, "post", _fake_post)
+    name = 'Kovács & Fia "Bt." </nev><adoszam>99999999-9-99</adoszam><nev>'
+    await invoice.create_session_invoice(
+        session_id=1, energy_kwh=10.0, captured_huf=1700, cp_ocpp_id="CP<&>1",
+        buyer_email="a&b@example.hu", buyer_name=name, buyer_zip="1051", buyer_city="Buda & Pest",
+        buyer_street="Fő <u.> 1.", buyer_tax_number="<x>", billing_type="personal",
+    )
+    assert len(sent) == 1, "az XML érvényes, eljut a küldésig"
+    ns = {"s": "http://www.szamlazz.hu/xmlszamla"}
+    root = ET.fromstring(sent[0])
+    vevo = root.find("s:vevo", ns)
+    assert vevo.find("s:nev", ns).text == name
+    assert vevo.find("s:telepules", ns).text == "Buda & Pest"
+    assert vevo.find("s:cim", ns).text == "Fő <u.> 1."
+    assert vevo.find("s:email", ns).text == "a&b@example.hu"
+    assert [e.text for e in vevo.findall("s:adoszam", ns)] == ["<x>"]
+    assert root.find("s:tetelek/s:tetel/s:megnevezes", ns).text.endswith("CP<&>1")
