@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -166,11 +166,11 @@ _FORBIDDEN_HINT = (
 )
 
 
-async def _is_admin(authorization: Optional[str]) -> bool:
+async def _is_admin(request: Request, authorization: Optional[str]) -> bool:
     if not authorization:
         return False
     try:
-        await verify_admin(authorization)
+        await verify_admin(request, authorization)
         return True
     except HTTPException:
         return False
@@ -182,6 +182,7 @@ async def _may_view(
     token: Optional[str],
     authorization: Optional[str],
     db: AsyncSession,
+    request: Request,
 ) -> bool:
     if token and verify_intent_token(token, intent_id):
         return True
@@ -189,7 +190,7 @@ async def _may_view(
         email = await email_from_authorization(authorization, db)
         if email and email == owner_email.strip().lower():
             return True
-    return await _is_admin(authorization)
+    return await _is_admin(request, authorization)
 
 
 def _forbidden() -> HTTPException:
@@ -290,6 +291,7 @@ async def get_active_session_for_cp(
 
 @router.get("/by-intent/{intent_id}", response_model=dict)
 async def get_session_by_intent(
+    request: Request,
     intent_id: int,
     db: AsyncSession = Depends(get_db),
     t: Optional[str] = Query(None, max_length=512),
@@ -299,7 +301,7 @@ async def get_session_by_intent(
     """PaySuccess polling: session keresése intent_id alapján (intent-token / saját fiók / admin)."""
     token = t or x_intent_token
     intent = (await db.execute(select(ChargingIntent).where(ChargingIntent.id == intent_id))).scalar_one_or_none()
-    if not await _may_view(intent_id, intent.anonymous_email if intent else None, token, authorization, db):
+    if not await _may_view(intent_id, intent.anonymous_email if intent else None, token, authorization, db, request):
         raise _forbidden()
     if intent is None:
         raise HTTPException(status_code=404, detail="Session not found for this intent")
@@ -414,6 +416,7 @@ async def stop_session(
 
 @router.get("/{session_id}", response_model=dict)
 async def get_session(
+    request: Request,
     session_id: int,
     db: AsyncSession = Depends(get_db),
     t: Optional[str] = Query(None, max_length=512),
@@ -431,8 +434,8 @@ async def get_session(
     )
     s = res.scalar_one_or_none()
     # Nem létező és nem engedélyezett session ugyanazt a 403-at kapja (ne lehessen id-t pásztázni).
-    if not s or not await _may_view(s.intent_id, s.anonymous_email, t or x_intent_token, authorization, db):
-        if s is None and await _is_admin(authorization):
+    if not s or not await _may_view(s.intent_id, s.anonymous_email, t or x_intent_token, authorization, db, request):
+        if s is None and await _is_admin(request, authorization):
             raise HTTPException(status_code=404, detail="Session not found")
         raise _forbidden()
     power_w = await _get_latest_power_w(db, s.id) if s.finished_at is None else None

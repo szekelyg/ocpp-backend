@@ -67,3 +67,40 @@ def test_uvicorn_keretmeret_es_naplomeret_korlat():
     assert "--ws-max-size 65536" in (deploy / "entrypoint.sh").read_text()
     compose = (deploy / "docker-compose.hetzner.yml").read_text()
     assert 'max-size: "50m"' in compose and compose.count("logging: *logging") == 3
+
+
+# ── 3. Vész-Basic admin: hibás jelszavak IP-nkénti korlátja ───────────────────
+
+def _basic_admin(password):
+    import base64
+    return {"Authorization": "Basic " + base64.b64encode(f"admin:{password}".encode()).decode()}
+
+
+async def test_admin_basic_hibas_jelszo_korlat(client, monkeypatch):
+    """Az ADMIN_PASSWORD korlátlanul próbálgatható volt (az /api/admin/* és a session-nézet admin-ágán is)."""
+    from app.core import rate_limit
+
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "1")
+    rate_limit.STORE.clear()
+    ip = {"CF-Connecting-IP": "203.0.113.50"}
+    limit = rate_limit.ADMIN_BASIC_FAIL.limit
+    try:
+        # a jó jelszavas kérések nem fogyasztják a keretet
+        for _ in range(limit + 5):
+            assert (await client.get("/api/admin/charge-points", headers={**ip, **ADMIN_AUTH})).status_code == 200
+        # hibás jelszó: a keretig 401 – az /api/admin/* és a session-nézet admin-ága KÖZÖS kereten
+        for i in range(limit):
+            path = "/api/admin/charge-points" if i % 2 else "/api/sessions/999"
+            r = await client.get(path, headers={**ip, **_basic_admin(f"tipp-{i}")})
+            assert r.status_code == (401 if i % 2 else 403), (i, r.text)
+        r = await client.get("/api/admin/charge-points", headers={**ip, **_basic_admin("tipp")})
+        assert r.status_code == 429 and r.headers.get("retry-after")
+        # a keret felett a JÓ jelszó sem megy át (különben a találat a 429 mögül is kiderülne)
+        assert (await client.get("/api/admin/charge-points", headers={**ip, **ADMIN_AUTH})).status_code == 429
+        # a session-nézet admin-ága sem árulja el a jó jelszót (nem létező munkamenet: admin 404-et kapna)
+        assert (await client.get("/api/sessions/999", headers={**ip, **ADMIN_AUTH})).status_code == 403
+        # másik IP-ről az admin dolgozhat tovább
+        assert (await client.get("/api/admin/charge-points",
+                                 headers={"CF-Connecting-IP": "203.0.113.51", **ADMIN_AUTH})).status_code == 200
+    finally:
+        rate_limit.STORE.clear()

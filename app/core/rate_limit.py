@@ -43,6 +43,11 @@ RULES: Tuple[Rule, ...] = (
     Rule("auth", "*", re.compile(r"^/api/auth/"), 60, 60),
 )
 
+# A vész-Basic admin belépés HIBÁS próbálkozásai IP-nként (app/api/routers/admin.py). Nem
+# útvonal-szabály: a middleware a válasz előtt számol, így a Keycloak-tokennel dolgozó admin
+# felület minden lekérdezését is megfogná – ezt az admin-hitelesítés hívja, csak hibás jelszónál.
+ADMIN_BASIC_FAIL = Rule("admin_basic_fail", "*", re.compile(r"^/api/admin/"), 10, 600)
+
 
 def _enabled() -> bool:
     return (os.environ.get("RATE_LIMIT_ENABLED") or "1").strip().lower() not in ("0", "false", "no")
@@ -68,26 +73,31 @@ class _Store:
         self.hits: Dict[Tuple[str, str], Deque[float]] = {}
         self._last_gc = time.monotonic()
 
-    def hit(self, rule: Rule, ip: str, now: float) -> Optional[int]:
-        """None = mehet; különben a javasolt Retry-After másodperc."""
-        key = (rule.name, ip)
-        q = self.hits.get(key)
-        if q is None:
-            q = self.hits[key] = deque()
+    def retry_after(self, rule: Rule, ip: str, now: float) -> Optional[int]:
+        """Számolás nélkül: None = a keret nem telt be; különben a javasolt Retry-After másodperc."""
+        q = self.hits.get((rule.name, ip))
+        if not q:
+            return None
         cutoff = now - rule.window_s
         while q and q[0] <= cutoff:
             q.popleft()
         if len(q) >= rule.limit:
             return max(1, int(q[0] + rule.window_s - now) + 1)
-        q.append(now)
-        self._gc(now)
         return None
+
+    def hit(self, rule: Rule, ip: str, now: float) -> Optional[int]:
+        """None = mehet (és beszámítjuk); különben a javasolt Retry-After másodperc."""
+        retry = self.retry_after(rule, ip, now)
+        if retry is None:
+            self.hits.setdefault((rule.name, ip), deque()).append(now)
+            self._gc(now)
+        return retry
 
     def _gc(self, now: float) -> None:
         if now - self._last_gc < 300:
             return
         self._last_gc = now
-        max_window = max(r.window_s for r in RULES)
+        max_window = max(r.window_s for r in (*RULES, ADMIN_BASIC_FAIL))
         for key in [k for k, q in self.hits.items() if not q or q[-1] <= now - max_window]:
             self.hits.pop(key, None)
 
@@ -96,6 +106,18 @@ class _Store:
 
 
 STORE = _Store()
+
+
+def admin_basic_retry_after(scope) -> Optional[int]:
+    """None = próbálkozhat; különben ennyi másodpercre ki van zárva a Basic-útról."""
+    if not _enabled():
+        return None
+    return STORE.retry_after(ADMIN_BASIC_FAIL, client_ip(scope), time.monotonic())
+
+
+def admin_basic_failed(scope) -> None:
+    if _enabled():
+        STORE.hit(ADMIN_BASIC_FAIL, client_ip(scope), time.monotonic())
 
 
 def _match(method: str, path: str) -> Optional[Rule]:

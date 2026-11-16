@@ -8,13 +8,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_db
+from app.core import rate_limit
 from app.db.models import ChargePoint, ChargeSession, ChargingIntent, Location
 from app.api.routers.charge_points import compute_status
 from app.services.auth_tokens import issue_intent_token
@@ -34,6 +35,8 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 #      (platform-repó: keycloak/scripts/apply-ev-admin-role.sh). Ez az elsődleges út.
 #   2. HTTP Basic (ADMIN_USERNAME / ADMIN_PASSWORD env) – vész-út, csak amíg az
 #      ADMIN_PASSWORD be van állítva; az env-ből törölve ez az út megszűnik.
+#      A hibás jelszó IP-nként számolódik (rate_limit.ADMIN_BASIC_FAIL): a keret felett a
+#      Basic-út 429-et ad – a jó jelszóra is –, a Keycloak-út ettől független.
 # Fail-closed: ha egyik sincs beállítva → 503 admin_not_configured.
 
 ADMIN_ROLE_DEFAULT = "ev-admin"
@@ -82,23 +85,29 @@ async def _admin_from_keycloak(token: str) -> AdminPrincipal:
     return AdminPrincipal(kind="keycloak", label=ident.email or ident.sub)
 
 
-def _admin_from_basic(b64: str) -> AdminPrincipal:
+def _admin_from_basic(b64: str, request: Request) -> AdminPrincipal:
     exp_user, exp_pass = _admin_creds()
     if not exp_pass:
         raise _unauthorized("basic_disabled")
+    retry = rate_limit.admin_basic_retry_after(request.scope)
+    if retry is not None:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="rate_limited",
+                            headers={"Retry-After": str(retry)})
     try:
         raw = base64.b64decode(b64.strip(), validate=True).decode("utf-8")
         username, _, password = raw.partition(":")
+        ok = secrets.compare_digest(username.encode(), exp_user.encode()) and \
+            secrets.compare_digest(password.encode(), exp_pass.encode())
     except Exception:
-        raise _unauthorized("malformed_basic")
-    ok = secrets.compare_digest(username.encode(), exp_user.encode()) and \
-         secrets.compare_digest(password.encode(), exp_pass.encode())
+        ok = False
     if not ok:
+        rate_limit.admin_basic_failed(request.scope)
+        logger.warning("admin: hibás Basic belépés ip=%s", rate_limit.client_ip(request.scope))
         raise _unauthorized("Unauthorized")
     return AdminPrincipal(kind="basic", label=username)
 
 
-async def verify_admin(authorization: Optional[str] = Header(None)) -> AdminPrincipal:
+async def verify_admin(request: Request, authorization: Optional[str] = Header(None)) -> AdminPrincipal:
     """Admin-jog: Keycloak Bearer `ev-admin` szereppel VAGY (vész-út) Basic. Lásd fent."""
     from app.services import keycloak
 
@@ -113,7 +122,7 @@ async def verify_admin(authorization: Optional[str] = Header(None)) -> AdminPrin
     if scheme.lower() == "bearer" and value:
         return await _admin_from_keycloak(value)
     if scheme.lower() == "basic" and value:
-        return _admin_from_basic(value)
+        return _admin_from_basic(value, request)
     raise _unauthorized("unsupported_auth_scheme")
 
 
