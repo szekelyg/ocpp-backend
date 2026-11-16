@@ -184,13 +184,6 @@ def reset_cache() -> None:
 # Token ellenőrzés
 # ---------------------------------------------------------------------------
 
-def looks_like_jwt(token: str) -> bool:
-    """Három base64url szegmens – ennyi elég a saját (v1./v1i.) tokenektől való megkülönböztetéshez."""
-    parts = token.split(".")
-    # az aláírás-szegmens lehet üres (alg=none) – azt is ide irányítjuk, hogy explicit elutasítás legyen
-    return len(parts) == 3 and bool(parts[0]) and bool(parts[1]) and not token.startswith(("v1.", "v1i."))
-
-
 def _aud_ok(claims: dict) -> bool:
     aud = claims.get("aud")
     if isinstance(aud, str):

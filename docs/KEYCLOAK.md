@@ -12,7 +12,7 @@ bejelentkezésként, a SPA-ban a „Belépés Energiafelhő-fiókkal" gomb az eg
 | **Vendég-töltés** (regisztráció nélkül, bankkártyával) | Változatlan: `POST /api/intents/` e-mail + számlázási adatok, Stripe, majd a töltés-oldal. |
 | **Nyugta-/leállítási link** a töltés után (`/charging/{id}?t=<intent-token>`, `v1i`) | Változatlan, fiók nélkül működik (lásd `docs/SESSIONS_AUTH_ELEMZES.md`). |
 | Régi, saját **e-mail-kódos belépés** (`POST /api/auth/request-code`, `POST /api/auth/verify-code`) | **Megszűnt.** Mindkét végpont HTTP **410** `{"error":"retired","message":"A régi e-mail-kódos belépés megszűnt. Lépj be az Energiafelhő-fiókoddal."}`; kódot nem küldünk, nem ellenőrzünk (`login_codes` táblába nem írunk). A SPA-ból a régi belépő (LoginAutofill) kikerült, a `localStorage.ef_auth_token` kulcsot a SPA betöltéskor törli. |
-| Korábban kiadott **v1 e-mail-tokenek** | A Bearer-t fogadó végpontok (`/api/me/*`, `/api/intents/`, `/api/sessions/{id}/stop`, `/api/auth/profile`) a **lejáratukig (30 nap) még elfogadják** – nincs mit visszavonni, maguktól lejárnak; a SPA viszont már nem küldi őket. Ha a 30 nap letelt, az `app/api/deps.py` v1 ága és az `issue_token`/`verify_token` törölhető. |
+| Korábban kiadott **v1 e-mail-tokenek** | A Bearer-t fogadó végpontok (`/api/me/*`, `/api/intents/`, `/api/sessions/{id}/stop`, `/api/auth/profile`) a lejáratukig (30 nap) még elfogadták. **2026-10-22-én mind lejárt; 2026-11-16-án a kódjuk (`app/api/deps.py` v1 ága, `issue_token`/`verify_token`) és a csak ezeket fogadó `GET /api/auth/profile` törölve.** |
 
 Miért maradt a v1 elfogadása? Egy ötsoros ág a `deps.py`-ban, saját titokkal aláírt, 30 napos
 token; a kivétele semmit nem tenne biztonságosabbá (kiadni már nem lehet), viszont a portál/SPA
@@ -86,9 +86,7 @@ KEYCLOAK_ALLOWED_AZP=portal          # a portál Keycloak-kliensének ID-ja (az 
 
 ## 3. Hogyan ellenőrzi a backend a tokent (`app/services/keycloak.py`)
 
-1. `Authorization: Bearer <token>`. Ha a token `v1.`/`v1i.` prefixű (4 szegmens) → a régi
-   HMAC-ellenőrzés (`auth_tokens.verify_token`; csak a még le nem járt, 2026-09-22 előtti
-   e-mail-tokenek), különben Keycloak-JWT.
+1. `Authorization: Bearer <token>` – kizárólag Keycloak-JWT (a régi `v1.` e-mail-token megszűnt).
 2. Fejléc: `alg` ∈ RS256/384/512, ES256/384/512 (`none`, HS* tiltva – a nyilvános kulccsal
    „aláírt" HS-token nem játszik), `kid` kötelező.
 3. JWKS a `{issuer}/protocol/openid-connect/certs`-ről, processzenként cache-elve
@@ -127,7 +125,7 @@ A SPA ebből indítja a PKCE-folyamatot; discovery-t a backend olvassa (6 órás
 
 ```json
 { "ok": true, "email": "ugyfel@example.hu", "name": "Ügyfél Ubul",
-  "auth_source": "keycloak" | "email_token" (utóbbi csak régi, még le nem járt v1 tokennel), "keycloak_linked": true,
+  "auth_source": "keycloak", "keycloak_linked": true,
   "profile": { "email", "billing_type", "billing_name", "billing_street", "billing_zip",
                "billing_city", "billing_country", "billing_company", "billing_tax_number" } | null }
 ```
@@ -186,7 +184,7 @@ const { sessions, total_kwh, total_huf } = await r.json();
   kötelező). Rossz/lejárt Bearer → 401 (a SPA ilyenkor törli a helyi belépést és a felhasználó
   vendégként folytathatja).
 - `POST /api/sessions/{id}/stop` – intent-token **vagy** a tulajdonos Bearer-je (mindkét fajta).
-- `GET /api/auth/profile` – marad (csak v1 e-mail-token); a SPA a `/api/me`-t használja.
+- `GET /api/auth/profile` – törölve (2026-11-16; csak v1 e-mail-tokent fogadott); a profil a `/api/me`-ben van.
 - `POST /api/auth/request-code`, `POST /api/auth/verify-code` – **410, megszűnt** (lásd 0.).
 
 ## 5. SPA (frontend)
@@ -216,7 +214,7 @@ run --rm --no-deps backend pytest`): saját RSA-kulcspár + mockolt JWKS/discove
 (`httpx.AsyncClient` helyettesítve); elutasított tokenek: lejárt, rossz `iss`, rossz
 `aud`/`azp`, `none`, HS256 a nyilvános kulccsal, idegen kulcs, ismeretlen `kid` (+ újratöltés
 throttle), ID/refresh `typ`, hiányzó `exp`/`email`; `email_verified=false` → 403 és nincs
-összekötés; kikapcsolt Keycloak → 401, régi v1 e-mail-token továbbra is jó; `/api/me/sessions` csak
+összekötés; kikapcsolt Keycloak → 401; `/api/me/sessions` csak
 saját e-mail (kis/nagybetű független), lapozás, összesítés, számla-PDF csak sajátra; CORS csak
 `/api/me/*` + portál origin; stop Keycloak-tokennel; intents SSO (fiók e-mail + profil), vendég
 kötelező mezők, rossz Bearer → 401.

@@ -31,7 +31,6 @@ import app.api.routers.sessions as _sessions_mod
 import app.services.keycloak as kc
 from app.db.models import ChargePoint, ChargeSession, ChargingIntent, Location, User
 from app.ocpp.time_utils import utcnow
-from app.services.auth_tokens import issue_token
 from tests.conftest import TestSession
 
 ISSUER = "https://id.test/realms/ugyfelek"
@@ -344,10 +343,6 @@ async def test_keycloak_disabled_is_fail_closed(client, monkeypatch):
     kc.reset_cache()
     r = await client.get("/api/me", headers=bearer(make_token()))
     assert r.status_code == 401 and r.json()["detail"] == "keycloak_keycloak_disabled"
-    # az e-mail-token ettől függetlenül működik
-    r = await client.get("/api/me", headers=bearer(issue_token("otp@example.hu")))
-    assert r.status_code == 200 and r.json()["auth_source"] == "email_token"
-    assert r.json()["keycloak_linked"] is False
     # és a config végpont szerint nincs Keycloak
     r = await client.get("/api/auth/keycloak/config")
     assert r.status_code == 200 and r.json() == {"enabled": False}
@@ -420,13 +415,13 @@ async def test_my_sessions_only_own_email(client):
 
 
 @pytest.mark.asyncio
-async def test_my_sessions_with_email_token_and_pagination(client):
+async def test_my_sessions_pagination(client):
     cp_id = await _seed_cp(with_location=False)
     for i in range(5):
         await _seed_session(cp_id, "otp@example.hu", kwh=1.0, huf=170, tx=f"T{i}")
     await _seed_session(cp_id, "masik@example.hu", kwh=1.0, huf=170)
 
-    h = bearer(issue_token("otp@example.hu"))
+    h = bearer(make_token(email="otp@example.hu"))
     r = await client.get("/api/me/sessions?limit=2&offset=0", headers=h)
     assert r.status_code == 200
     b = r.json()

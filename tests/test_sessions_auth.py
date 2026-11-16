@@ -30,8 +30,8 @@ import app.api.routers.payments_stripe as _stripe_mod
 import app.api.routers.sessions as _sessions_mod
 from app.db.models import ChargePoint, ChargeSession, ChargingIntent, User
 from app.ocpp.time_utils import utcnow
-from app.services.auth_tokens import issue_intent_token, issue_token, verify_intent_token
-from tests.conftest import TestSession
+from app.services.auth_tokens import issue_intent_token, verify_intent_token
+from tests.conftest import TestSession, signed_token
 
 # A webhook saját DB-sessiont nyit import-időben kötött sessionmakerrel → teszt DB-re.
 _stripe_mod.AsyncSessionLocal = TestSession
@@ -150,18 +150,22 @@ async def test_public_stop_rejects_without_proof(client, stop_accepted):
                               json={"token": "v1.x.y.z"})).status_code == 403
     assert (await client.post(f"/api/sessions/{sid}/stop",
                               json={"token": issue_intent_token(other_intent)})).status_code == 403
-    # Egy e-mail-token (v1) nem intent-token (v1i), még ha az alanya pont "intent:<id>" lenne is
+    # Más típusú (pl. a megszűnt "v1" e-mail-) token nem intent-token (v1i), még ha érvényes az
+    # aláírása, és az alanya pont "intent:<id>" is
     assert (await client.post(f"/api/sessions/{sid}/stop",
-                              json={"token": issue_token(f"intent:{intent_id}")})).status_code == 403
+                              json={"token": signed_token("v1", f"intent:{intent_id}")})).status_code == 403
     # ...és a prefix átírása elrontja az aláírást
-    relabeled = "v1i." + issue_token(f"intent:{intent_id}").split(".", 1)[1]
+    relabeled = "v1i." + signed_token("v1", f"intent:{intent_id}").split(".", 1)[1]
     assert (await client.post(f"/api/sessions/{sid}/stop",
                               json={"token": relabeled})).status_code == 403
+    # (ellenpróba: a segéd jó aláírást készít – v1i típussal ugyanez a token érvényes)
+    assert verify_intent_token(signed_token("v1i", f"intent:{intent_id}"), intent_id)
 
-    # Más e-mail Bearer-tokenje
+    # A megszűnt v1 e-mail-token Bearer-ként sem ér semmit – a SAJÁT e-mailre szóló sem
+    # (a saját Keycloak-fiókos leállítást a test_keycloak_auth.py fedi)
     assert (await client.post(
         f"/api/sessions/{sid}/stop",
-        headers={"Authorization": f"Bearer {issue_token('masik@example.hu')}"},
+        headers={"Authorization": f"Bearer {signed_token('v1', 'vendeg@example.hu')}"},
     )).status_code == 403
 
     assert stop_accepted == [], "jogosulatlan kérésre nem mehet RemoteStop a töltőnek"
@@ -176,20 +180,6 @@ async def test_public_stop_with_intent_token(client, stop_accepted):
     assert r.status_code == 200, r.text
     assert r.json()["ok"] is True
     assert stop_accepted == [("CP-AUTH", "TX-1")]
-
-
-@pytest.mark.asyncio
-async def test_public_stop_with_own_email_token(client, stop_accepted):
-    """Tartalék: e-mail-kódos belépés után a saját e-mailhez tartozó töltés leállítható."""
-    cp_id = await _seed_cp()
-    sid, _ = await _seed_session(cp_id, email="Vendeg@Example.hu")
-
-    r = await client.post(
-        f"/api/sessions/{sid}/stop",
-        headers={"Authorization": f"Bearer {issue_token('vendeg@example.hu')}"},
-    )
-    assert r.status_code == 200, r.text
-    assert len(stop_accepted) == 1
 
 
 @pytest.mark.asyncio
@@ -212,17 +202,18 @@ async def test_admin_stop_still_works(client, stop_accepted):
 
 
 @pytest.mark.asyncio
-async def test_intent_token_is_not_an_email_token(client):
-    """Fordított irány: az intent-token nem fogadható el bejelentkezésként."""
+async def test_own_tokens_are_not_a_login(client):
+    """Sem az intent-token, sem a megszűnt v1 e-mail-token nem fogadható el bejelentkezésként."""
     cp_id = await _seed_cp()
     _, intent_id = await _seed_session(cp_id)
+    for token in (issue_intent_token(intent_id), signed_token("v1", "vendeg@example.hu")):
+        for path in ("/api/me", "/api/me/sessions"):
+            r = await client.get(path, headers={"Authorization": f"Bearer {token}"})
+            assert r.status_code == 401, (path, token[:4])
+    # a csak v1 tokent fogadó profil-végpont megszűnt
     r = await client.get("/api/auth/profile",
-                         headers={"Authorization": f"Bearer {issue_intent_token(intent_id)}"})
-    assert r.status_code == 401
-    # a valódi e-mail-token továbbra is jó
-    r = await client.get("/api/auth/profile",
-                         headers={"Authorization": f"Bearer {issue_token('vendeg@example.hu')}"})
-    assert r.status_code == 200
+                         headers={"Authorization": f"Bearer {signed_token('v1', 'vendeg@example.hu')}"})
+    assert r.status_code == 404
 
 
 # ── Intents: users-írás, token, throttle ─────────────────────────────────────

@@ -55,6 +55,19 @@ import app.db.session as _db_session_module
 _db_session_module.AsyncSessionLocal = TestSession
 
 
+def signed_token(kind: str, subject: str) -> str:
+    """Érvényes aláírású, le nem járt saját token tetszőleges típus-prefixszel – pl. a megszűnt
+    "v1" e-mail-token (amit a régi issue_token adott ki): azt bizonyítja, hogy már semmi nem fogadja el."""
+    import hashlib
+    import hmac
+    import time
+
+    b64 = base64.urlsafe_b64encode(subject.encode()).decode().rstrip("=")
+    payload = f"{kind}.{b64}.{int(time.time()) + 3600}"
+    sig = hmac.new(os.environ["AUTH_SECRET"].encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{sig}"
+
+
 def token_header(token: str) -> dict:
     """OCPI Authorization header with a base64-encoded token."""
     encoded = base64.b64encode(token.encode()).decode()

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import AsyncGenerator, Literal, Optional
+from typing import AsyncGenerator, Optional
 
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy import select
@@ -19,15 +19,13 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 # ---------------------------------------------------------------------------
-# Bejelentkezett fiók: Keycloak access token (az egyetlen belépési út), VAGY egy még le
-# nem járt, 2026-09-22 előtt kiadott v1 e-mail-token (a régi e-mail-kódos belépés megszűnt,
-# újat nem adunk ki; a meglévők 30 napon belül maguktól lejárnak – akkor ez az ág törölhető).
+# Bejelentkezett fiók: Keycloak access token – az egyetlen belépési út. (A régi e-mail-kódos
+# belépés v1 tokenjei 2026-10-22-én lejártak; a kódjuk is megszűnt.)
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class Identity:
     email: str                                   # kisbetűs; a users / charge_sessions kulcsa
-    source: Literal["email_token", "keycloak"]
     keycloak_sub: Optional[str] = None
     name: Optional[str] = None
     is_admin: bool = False                       # Keycloak realm-szerep (KEYCLOAK_ADMIN_ROLE) – csak kijelzéshez
@@ -43,16 +41,7 @@ def _bearer(authorization: Optional[str]) -> Optional[str]:
 async def _identity_from_token(token: str, db: AsyncSession) -> Identity:
     """Token → Identity. 401, ha érvénytelen; 403, ha a Keycloak e-mail nincs megerősítve."""
     from app.services import keycloak
-    from app.services.auth_tokens import verify_token
 
-    # 1) régi e-mail-token (v1.<b64>.<exp>.<sig>) – csak a lejáratukig, újat nem adunk ki
-    if not keycloak.looks_like_jwt(token):
-        email = verify_token(token)
-        if not email:
-            raise HTTPException(status_code=401, detail="invalid_or_expired_token")
-        return Identity(email=email, source="email_token")
-
-    # 2) Keycloak JWT
     try:
         kc = await keycloak.verify_access_token(token)
     except keycloak.KeycloakAuthError as e:
@@ -68,7 +57,7 @@ async def _identity_from_token(token: str, db: AsyncSession) -> Identity:
     await _link_keycloak_user(db, email=kc.email, sub=kc.sub)
     from app.api.routers.admin import admin_role
 
-    return Identity(email=kc.email, source="keycloak", keycloak_sub=kc.sub, name=kc.name,
+    return Identity(email=kc.email, keycloak_sub=kc.sub, name=kc.name,
                     is_admin=admin_role() in kc.realm_roles)
 
 

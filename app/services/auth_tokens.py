@@ -1,14 +1,13 @@
 # app/services/auth_tokens.py
 """
-Saját, aláírt tokenek – külső könyvtár nélkül.
+Saját, aláírt intent-token (v1i) – külső könyvtár nélkül: HMAC-SHA256-tal aláírt, állapotmentes
+token ("v1i.<b64url(intent:<id>)>.<exp>.<sig>"), a vendég-töltés nyugta-/leállítási linkjének
+bizonyítéka. (A régi e-mail-kódos belépés v1 e-mail-tokenje megszűnt; a "v1." előtagú tokent
+semmi nem fogadja el.)
 
-- E-mail-token (v1): HMAC-SHA256-tal aláírt, állapotmentes token
-  ("v1.<b64url(email)>.<exp>.<sig>"). Kiadni már nem adjuk ki ügyfélnek – a régi e-mail-kódos
-  belépés 2026-09-22-én megszűnt –, de a korábban kiadottakat a lejáratukig elfogadjuk.
-- Intent-token (v1i): a vendég-töltés nyugta-/leállítási linkjének bizonyítéka (változatlan).
-
-A titok forrása AUTH_SECRET; ha nincs beállítva, a már meglévő STRIPE_WEBHOOK_SECRET-re
-esik vissza, hogy külön konfiguráció nélkül is deploy-olható legyen.
+A titok forrása AUTH_SECRET. ÁTMENETILEG, amíg az élesben nincs beállítva, a STRIPE_WEBHOOK_SECRET-re
+esik vissza (induláskor figyelmeztetés a naplóban) – az AUTH_SECRET beállítása után a
+visszaesés törlendő: egy titok egy célra.
 """
 from __future__ import annotations
 
@@ -19,8 +18,10 @@ import os
 import time
 from typing import Optional
 
-# E-mail-token élettartama: 30 nap (a 2026-09-22 előtt kiadottak eddig élnek)
-TOKEN_TTL_S = 30 * 24 * 60 * 60
+
+def secret_is_fallback() -> bool:
+    """True, ha nincs AUTH_SECRET, és az intent-tokent a Stripe webhook-titok írja alá."""
+    return not os.environ.get("AUTH_SECRET")
 
 
 def _secret() -> bytes:
@@ -29,10 +30,6 @@ def _secret() -> bytes:
         raise RuntimeError("Missing AUTH_SECRET (and STRIPE_WEBHOOK_SECRET fallback)")
     return s.encode("utf-8")
 
-
-# ---------------------------------------------------------------------------
-# E-mail-token (állapotmentes, aláírt)
-# ---------------------------------------------------------------------------
 
 def _b64u(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).decode("ascii").rstrip("=")
@@ -43,26 +40,24 @@ def _b64u_decode(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + pad)
 
 
-# Token-típusok: a verzió-/típus-prefix az aláírt payload része, így egy e-mail-token
-# nem címkézhető át intent-tokenné (és fordítva) az aláírás elrontása nélkül.
-_KIND_EMAIL = "v1"     # alany: e-mail-cím
+# A típus-prefix az aláírt payload része: más prefixű (pl. a megszűnt "v1" e-mail-) token
+# nem címkézhető át intent-tokenné az aláírás elrontása nélkül.
 _KIND_INTENT = "v1i"   # alany: "intent:<id>"
 
 
-def _issue(kind: str, subject: str, ttl_s: int) -> str:
-    subject = subject.strip().lower()
+def _issue(subject: str, ttl_s: int) -> str:
     exp = int(time.time()) + int(ttl_s)
-    payload = f"{kind}.{_b64u(subject.encode('utf-8'))}.{exp}"
+    payload = f"{_KIND_INTENT}.{_b64u(subject.encode('utf-8'))}.{exp}"
     sig = hmac.new(_secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()
     return f"{payload}.{sig}"
 
 
-def _verify(kind: str, token: Optional[str]) -> Optional[str]:
-    """Visszaadja az alanyt, ha a token az adott típusú, érvényes és nem járt le."""
+def _verify(token: Optional[str]) -> Optional[str]:
+    """Visszaadja az alanyt, ha a token intent-típusú, érvényes és nem járt le."""
     if not token:
         return None
     parts = token.split(".")
-    if len(parts) != 4 or parts[0] != kind:
+    if len(parts) != 4 or parts[0] != _KIND_INTENT:
         return None
     payload = ".".join(parts[:3])
     sig = parts[3]
@@ -81,23 +76,9 @@ def _verify(kind: str, token: Optional[str]) -> Optional[str]:
         return None
 
 
-def issue_token(email: str, ttl_s: int = TOKEN_TTL_S) -> str:
-    return _issue(_KIND_EMAIL, email, ttl_s)
-
-
-def verify_token(token: str) -> Optional[str]:
-    """Visszaadja az email-t, ha az e-mail-token érvényes és nem járt le; különben None.
-
-    Csak e-mail-típusú (v1) tokent fogad el; az intent-token (v1i) itt None.
-    """
-    email = _verify(_KIND_EMAIL, token)
-    return email if email and "@" in email else None
-
-
 # ---------------------------------------------------------------------------
 # Intent-token: a vendég (regisztráció nélküli) töltés "birtoklási" bizonyítéka
 # ---------------------------------------------------------------------------
-# Ugyanaz az aláírt token-formátum, de külön típus-prefixszel (v1i) és "intent:<id>" alannyal.
 # A POST /api/intents/ adja ki, a Stripe success_url-ben és a "töltés elindult"
 # e-mail linkjében utazik, és a POST /api/sessions/{id}/stop ezzel ellenőrzi, hogy
 # tényleg az állítja le a töltést, aki fizetett érte. Nem kell hozzá bejelentkezés.
@@ -109,14 +90,11 @@ def _intent_subject(intent_id: int) -> str:
 
 
 def issue_intent_token(intent_id: int) -> str:
-    return _issue(_KIND_INTENT, _intent_subject(intent_id), INTENT_TOKEN_TTL_S)
+    return _issue(_intent_subject(intent_id), INTENT_TOKEN_TTL_S)
 
 
 def verify_intent_token(token: Optional[str], intent_id: Optional[int]) -> bool:
-    """True, ha a token intent-típusú, érvényes és pont ehhez az intenthez tartozik.
-
-    E-mail-token (v1) itt sosem érvényes, akkor sem, ha az alanya "intent:<id>" lenne.
-    """
+    """True, ha a token intent-típusú, érvényes és pont ehhez az intenthez tartozik."""
     if not token or intent_id is None:
         return False
-    return _verify(_KIND_INTENT, token) == _intent_subject(intent_id)
+    return _verify(token) == _intent_subject(intent_id)

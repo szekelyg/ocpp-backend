@@ -104,3 +104,21 @@ async def test_admin_basic_hibas_jelszo_korlat(client, monkeypatch):
                                  headers={"CF-Connecting-IP": "203.0.113.51", **ADMIN_AUTH})).status_code == 200
     finally:
         rate_limit.STORE.clear()
+
+
+# ── 4. Intent-token aláíró titka: figyelmeztetés, ha a Stripe-titokra esik vissza ──
+
+@pytest.mark.parametrize("auth_secret, warns", [(None, True), ("sajat-titok", False)])
+async def test_indulaskor_figyelmeztet_ha_nincs_auth_secret(auth_secret, warns, monkeypatch, caplog):
+    """(A megszűnt v1 e-mail-token elutasítását a test_sessions_auth.py / test_keycloak_auth.py fedi.)"""
+    import logging
+    from app.main import app, lifespan
+
+    if auth_secret is None:
+        monkeypatch.delenv("AUTH_SECRET", raising=False)
+    else:
+        monkeypatch.setenv("AUTH_SECRET", auth_secret)
+    with caplog.at_level(logging.WARNING, logger="backend"):
+        async with lifespan(app):
+            pass
+    assert any("AUTH_SECRET NINCS beállítva" in r.getMessage() for r in caplog.records) is warns

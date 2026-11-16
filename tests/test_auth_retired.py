@@ -1,15 +1,9 @@
 """A régi e-mail-kódos belépés megszűnt (TERV-egy-fiok, C. fázis, 2026-09-22).
 
-A két régi végpont HTTP 410-et ad, kódot nem küld és nem ellenőriz; a Keycloak-config és a
-profil végpont marad; a korábban kiadott v1 e-mail-tokenek a lejáratukig még jók.
+A két régi végpont HTTP 410-et ad, kódot nem küld és nem ellenőriz; a Keycloak-config marad.
+A v1 e-mail-tokenek 2026-10-22-én lejártak: a kódjuk és a csak azokat fogadó profil-végpont törölve.
 """
-import os
-
 import pytest
-
-os.environ.setdefault("AUTH_SECRET", "test-auth-secret")
-
-from app.services.auth_tokens import issue_token  # noqa: E402
 
 RETIRED = {
     "error": "retired",
@@ -36,15 +30,11 @@ async def test_no_login_code_is_written(client, db):
     assert (await db.execute(select(LoginCode))).scalars().all() == []
 
 
-async def test_keycloak_config_and_profile_remain(client, monkeypatch):
+async def test_keycloak_config_remains_profile_gone(client, monkeypatch):
     monkeypatch.delenv("KEYCLOAK_ISSUER", raising=False)
     from app.services import keycloak
     keycloak.reset_cache()
     r = await client.get("/api/auth/keycloak/config")
     assert r.status_code == 200 and r.json() == {"enabled": False}
 
-    # profil: token nélkül 401, régi (még érvényes) v1 e-mail-tokennel 200
-    assert (await client.get("/api/auth/profile")).status_code == 401
-    r = await client.get("/api/auth/profile",
-                         headers={"Authorization": f"Bearer {issue_token('regi@example.hu')}"})
-    assert r.status_code == 200 and r.json() == {"ok": True, "profile": None}
+    assert (await client.get("/api/auth/profile")).status_code == 404

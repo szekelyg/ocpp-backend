@@ -355,6 +355,13 @@ async def _load_balance_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    from app.services.auth_tokens import secret_is_fallback
+    if secret_is_fallback():
+        logger.warning(
+            "AUTH_SECRET NINCS beállítva: az intent-tokeneket (nyugta-/leállítási link) átmenetileg a "
+            "STRIPE_WEBHOOK_SECRET írja alá. Állíts be saját AUTH_SECRET-et a deploy/.env-ben "
+            "(utána a visszaesés törölhető a kódból)."
+        )
     tasks = [
         asyncio.create_task(_waiting_timeout_loop()),
         asyncio.create_task(_invoice_retry_loop()),

@@ -59,7 +59,7 @@ class CreateIntentIn(BaseModel):
     # a sorszámos id és az ocpp_id is elfogadott (resolve_public_charge_point).
     charge_point_id: Union[int, str]
     connector_id: int = Field(1, ge=0)  # 0 is lehet (szimulátor)
-    # Vendégnek kötelező. Bejelentkezve (Bearer: e-mail-token vagy Keycloak) a fiók e-mailje
+    # Vendégnek kötelező. Bejelentkezve (Bearer: Keycloak) a fiók e-mailje
     # számít, a body-beli értéket figyelmen kívül hagyjuk – a session így a fiókhoz kötődik.
     email: Optional[EmailStr] = None
     hold_amount_huf: int = Field(5000, ge=1000, le=25000)
@@ -126,7 +126,7 @@ async def create_intent(
     db: AsyncSession = Depends(get_db),
     ident: Optional[Identity] = Depends(get_optional_identity),
 ):
-    # 0) Kinek a nevében? Bejelentkezve (Keycloak / e-mail-token) a fiók e-mailje – SSO-felismerés.
+    # 0) Kinek a nevében? Bejelentkezve (Keycloak) a fiók e-mailje – SSO-felismerés.
     if ident is not None:
         email = ident.email
     elif body.email:
