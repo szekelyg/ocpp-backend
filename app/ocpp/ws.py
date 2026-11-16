@@ -29,6 +29,10 @@ from app.services.load_balance import rebalance_for_cp
 
 logger = logging.getLogger("ocpp")
 
+# A nyers keretből ennyi karakter kerül a naplóba (egy töltő-üzenet ennél jóval rövidebb;
+# a keret méretét az uvicorn --ws-max-size korlátozza, lásd deploy/entrypoint.sh)
+RAW_LOG_MAX_CHARS = 2000
+
 
 async def _lookup_cp_auth(cp_id: str) -> tuple[bool, Optional[str], bool]:
     """(ismert-e a töltő, tárolt kulcs-hash, publikált-e)."""
@@ -158,7 +162,7 @@ async def handle_ocpp(ws: WebSocket, cp_id: str):
     try:
         while True:
             raw = await ws.receive_text()
-            logger.debug(f"OCPP RAW: {raw}")
+            logger.debug(f"OCPP RAW: {raw[:RAW_LOG_MAX_CHARS]}")
 
             try:
                 msg = json.loads(raw)
@@ -206,7 +210,10 @@ async def handle_ocpp(ws: WebSocket, cp_id: str):
             # ACTION DISPATCH
             # ----------------------------------------------------------------------
             if action == "BootNotification":
-                await upsert_charge_point_from_boot(cp_id, payload)
+                if not await upsert_charge_point_from_boot(cp_id, payload):
+                    response = [3, unique_id, {"status": "Rejected", "currentTime": iso_utc_now_z(), "interval": 300}]
+                    await ws.send_text(json.dumps(response))
+                    continue
                 response = [3, unique_id, {"status": "Accepted", "currentTime": iso_utc_now_z(), "interval": 60}]
                 await ws.send_text(json.dumps(response))
                 # Kötelező beállítások (ConnectionTimeOut, offline töltés tiltása): bootonként egyszer

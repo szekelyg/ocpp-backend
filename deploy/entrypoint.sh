@@ -7,6 +7,8 @@ alembic upgrade head
 echo "[entrypoint] Starting uvicorn on 0.0.0.0:8000"
 # --proxy-headers + forwarded-allow-ips: a Caddy mögött helyes scheme/host
 # (PUBLIC_BASE_URL, Stripe redirectek, webhook URL-ek miatt fontos)
+# --ws-max-size: egy OCPP-keret legfeljebb 64 KB (az alap 16 MB; a töltők üzenetei néhány KB-osak)
 exec uvicorn app.main:app \
     --host 0.0.0.0 --port 8000 \
-    --proxy-headers --forwarded-allow-ips '*'
+    --proxy-headers --forwarded-allow-ips '*' \
+    --ws-max-size 65536

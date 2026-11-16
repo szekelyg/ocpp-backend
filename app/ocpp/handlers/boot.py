@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.db.session import AsyncSessionLocal
 from app.db.models import ChargePoint
@@ -10,8 +10,14 @@ from app.ocpp.time_utils import utcnow
 
 logger = logging.getLogger("ocpp")
 
+# Ennyi publikálatlan („konfigurálásra vár") töltő lehet egyszerre. Ismeretlen azonosítóval
+# bárki küldhet BootNotificationt, és mindegyik új charge_points sort hozna létre.
+MAX_UNPUBLISHED_CHARGE_POINTS = 20
 
-async def upsert_charge_point_from_boot(cp_id: str, payload: dict) -> None:
+
+async def upsert_charge_point_from_boot(cp_id: str, payload: dict) -> bool:
+    """A töltő adatainak mentése. False = ismeretlen töltő, de a publikálatlanok kerete betelt
+    (nem vesszük fel, a boot elutasítandó)."""
     vendor = payload.get("chargePointVendor")
     model = payload.get("chargePointModel")
     serial = payload.get("chargePointSerialNumber")
@@ -25,6 +31,16 @@ async def upsert_charge_point_from_boot(cp_id: str, payload: dict) -> None:
             now_dt = utcnow()
 
             if cp is None:
+                unpublished = (await session.execute(
+                    select(func.count()).select_from(ChargePoint).where(ChargePoint.is_published.is_(False))
+                )).scalar_one()
+                if unpublished >= MAX_UNPUBLISHED_CHARGE_POINTS:
+                    logger.warning(
+                        f"Ismeretlen töltő BootNotificationje ELUTASÍTVA: {cp_id} – már {unpublished} "
+                        f"publikálatlan töltő vár konfigurálásra (keret: {MAX_UNPUBLISHED_CHARGE_POINTS}); "
+                        f"az admin felületen publikálni vagy törölni kell közülük"
+                    )
+                    return False
                 # Publikálatlanul jön létre: az admin felületen jelenik meg
                 # "konfigurálásra vár" alatt, az éles appban nem.
                 cp = ChargePoint(
@@ -55,3 +71,4 @@ async def upsert_charge_point_from_boot(cp_id: str, payload: dict) -> None:
             await session.commit()
     except Exception as e:
         logger.exception(f"Hiba a ChargePoint mentésekor: {e}")
+    return True
