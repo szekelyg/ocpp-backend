@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+from html import escape
 from typing import Optional
 
 import httpx
@@ -53,6 +54,9 @@ def _base_url() -> str:
 # ---------------------------------------------------------------------------
 # Email sablonok
 # ---------------------------------------------------------------------------
+# Minden behelyettesített ADAT (ügyfél által megadott név/cím, töltő neve, link) html.escape-en
+# megy át – a segédfüggvényekben (_stat, _btn), illetve a szövegbe írás helyén. Kész HTML-t
+# csak a saját, állandó szövegeink tartalmaznak (body, reason).
 
 def _wrap(title: str, body: str) -> str:
     """Alap HTML wrapper – egységes kinézet minden emailhez."""
@@ -101,17 +105,17 @@ def _wrap(title: str, body: str) -> str:
 
 def _btn(url: str, label: str) -> str:
     return (
-        f'<a href="{url}" style="display:inline-block;margin-top:20px;padding:12px 24px;'
+        f'<a href="{escape(url)}" style="display:inline-block;margin-top:20px;padding:12px 24px;'
         f'background:#1d4ed8;color:#fff;text-decoration:none;border-radius:10px;'
-        f'font-weight:600;font-size:14px;">{label}</a>'
+        f'font-weight:600;font-size:14px;">{escape(label)}</a>'
     )
 
 
 def _stat(label: str, value: str) -> str:
     return (
         f'<tr>'
-        f'<td style="padding:8px 0;color:#94a3b8;font-size:14px;width:120px;">{label}</td>'
-        f'<td style="padding:8px 0;color:#f1f5f9;font-size:14px;font-weight:600;">{value}</td>'
+        f'<td style="padding:8px 0;color:#94a3b8;font-size:14px;width:120px;">{escape(label)}</td>'
+        f'<td style="padding:8px 0;color:#f1f5f9;font-size:14px;font-weight:600;">{escape(value)}</td>'
         f'</tr>'
     )
 
@@ -138,7 +142,7 @@ async def send_charging_started_email(
     body = f"""
     <h2 style="margin:0 0 8px;font-size:20px;color:#f1f5f9;">Töltés elindult</h2>
     <p style="margin:0 0 20px;color:#94a3b8;font-size:14px;">
-      A töltő (<strong style="color:#e2e8f0;">{cp_ocpp_id}</strong>) fogadta a kérést.
+      A töltő (<strong style="color:#e2e8f0;">{escape(cp_ocpp_id)}</strong>) fogadta a kérést.
       Ha az autó már be van dugva, a töltés azonnal indul – egyébként csatlakoztassa most.
     </p>
 
@@ -173,7 +177,7 @@ async def send_no_start_email(
     töltő offline volt (main.py lejárati köre, offline-ra váró munkamenet)."""
     from app.ocpp.handlers.pending_start import WAITING_TIMEOUT_MINUTES
     if reason is None:
-        reason = (f"A töltő (<strong style=\"color:#e2e8f0;\">{cp_ocpp_id}</strong>) {WAITING_TIMEOUT_MINUTES} "
+        reason = (f"A töltő (<strong style=\"color:#e2e8f0;\">{escape(cp_ocpp_id)}</strong>) {WAITING_TIMEOUT_MINUTES} "
                   f"percen belül nem kapott csatlakozást. A munkamenet automatikusan lezárult.")
     body = f"""
     <h2 style="margin:0 0 8px;font-size:20px;color:#f1f5f9;">Töltés nem indult el</h2>

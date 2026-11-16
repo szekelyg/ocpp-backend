@@ -157,3 +157,36 @@ async def test_szamla_xml_vevo_adatok_escape(monkeypatch):
     assert vevo.find("s:email", ns).text == "a&b@example.hu"
     assert [e.text for e in vevo.findall("s:adoszam", ns)] == ["<x>"]
     assert root.find("s:tetelek/s:tetel/s:megnevezes", ns).text.endswith("CP<&>1")
+
+
+# ── 6. E-mailek: az ügyfél-adat HTML-escape-elve kerül a levélbe ──────────────
+
+@pytest.fixture
+def sent_emails(monkeypatch):
+    from app.services import email
+
+    sent = []
+
+    async def _fake_send(to, subject, html):
+        sent.append(html)
+        return True
+
+    monkeypatch.setattr(email, "_send", _fake_send)
+    return sent
+
+
+async def test_email_ugyfel_adat_html_escape(sent_emails):
+    from app.services import email
+
+    evil = '<img src=x onerror=alert(1)> & "Fia"'
+    await email.send_receipt_email(
+        to="a@b.hu", session_id=1, cp_ocpp_id=evil, energy_kwh=1.0, cost_huf=170,
+        billing_name=evil, billing_type="business", billing_company=evil, billing_tax_number=evil,
+        billing_street=evil, billing_zip=evil, billing_city=evil, billing_country=evil,
+    )
+    await email.send_charging_started_email(to="a@b.hu", session_id=1, cp_ocpp_id=evil, intent_token='t"><b>')
+    await email.send_no_start_email(to="a@b.hu", session_id=1, cp_ocpp_id=evil)
+    assert len(sent_emails) == 3
+    for html in sent_emails:
+        assert "<img" not in html and "<b>" not in html
+    assert sent_emails[0].count("&lt;img src=x onerror=alert(1)&gt; &amp; &quot;Fia&quot;") >= 4
