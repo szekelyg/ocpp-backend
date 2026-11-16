@@ -428,18 +428,13 @@ add_ocpi_exception_handlers(app)
 # hitelesítés NÉLKÜL voltak elérhetők (bárki újraindíthatott egy töltőt) – eltávolítva.
 
 
-# OCPP WebSocket endpoint – ID-val a path-ban
+# OCPP WebSocket endpoint – a töltő azonosítója kötelezően az URL-ben van. Azonosító nélküli
+# (/ocpp) útvonal szándékosan NINCS: ott a töltő a BootNotificationben mondta volna meg, kicsoda,
+# a hitelesítés és a duplikált-kapcsolat szabály megkerülésével (az ilyen kézfogás 403-at kap).
 @app.websocket("/ocpp/{charge_point_id}")
 async def ocpp_with_id(ws: WebSocket, charge_point_id: str):
     logger.info(f"OCPP kapcsolat érkezett path=/ocpp/{charge_point_id}, ID={charge_point_id}")
     await handle_ocpp(ws, charge_point_id)
-
-
-# OCPP WebSocket endpoint – ha nincs ID a path-ban
-@app.websocket("/ocpp")
-async def ocpp_no_id(ws: WebSocket):
-    logger.info("OCPP kapcsolat érkezett path=/ocpp (nincs ID a path-ban)")
-    await handle_ocpp(ws, None)
 
 
 # -----------------------------

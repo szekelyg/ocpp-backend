@@ -32,13 +32,6 @@ _PENDING_CALLS: Dict[Tuple[str, str], asyncio.Future] = {}
 _REGISTRY_LOCK = asyncio.Lock()
 
 
-async def register_ws(cp_id: str, ws: WebSocket, authenticated: bool = False) -> None:
-    async with _REGISTRY_LOCK:
-        _ACTIVE_WS[cp_id] = ws
-        _WS_AUTH[cp_id] = bool(authenticated)
-        _CONNECTED_AT[cp_id] = utcnow()
-
-
 async def admit_ws(cp_id: str, ws: WebSocket, authenticated: bool) -> Tuple[bool, Optional[WebSocket]]:
     """Második, egyidejű kapcsolat ugyanarra az ocpp_id-ra – szabály (docs/OCPP-HITELESITES.md):
 

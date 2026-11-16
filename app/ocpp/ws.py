@@ -9,12 +9,10 @@ from typing import Optional, Any
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
-from app.ocpp.parsers import extract_cp_id_from_boot
 from app.ocpp.ocpp_utils import _as_int
 from app.ocpp.time_utils import iso_utc_now_z
 from app.ocpp.registry import (
     admit_ws,
-    register_ws,
     unregister_ws_if_same,
     pending_get,
     change_configuration,
@@ -85,27 +83,25 @@ async def _close_replaced(old: WebSocket, cp_id: str) -> None:
     logger.warning(f"OCPP: cp={cp_id} új kapcsolat érkezett, a régit lezártuk")
 
 
-async def _admit(ws: WebSocket, cp_id: Optional[str]) -> Optional[bool]:
+async def _admit(ws: WebSocket, cp_id: str) -> Optional[bool]:
     """Hitelesítés + duplikált kapcsolat szabály. None = elutasítva (a választ már elküldtük),
     különben: hitelesített-e a kapcsolat."""
     mode = ocpp_auth.auth_mode()
     scheme = ocpp_auth.transport_scheme(ws.headers, ws.url.scheme)
 
     if mode == "off":
-        if cp_id:
-            await _record_auth(cp_id, None, scheme)
+        await _record_auth(cp_id, None, scheme)
         return False
 
     known, key_hash, published = (False, None, True)
-    if cp_id:
-        try:
-            known, key_hash, published = await _lookup_cp_auth(cp_id)
-        except Exception:
-            logger.exception(f"OCPP auth: töltő-lekérdezés sikertelen cp={cp_id}")
-            if mode == "enforce":
-                await _deny(ws, 503, "auth lookup failed")
-                return None
-            # log módban egy DB-hiba miatt nem zárjuk ki a töltőt
+    try:
+        known, key_hash, published = await _lookup_cp_auth(cp_id)
+    except Exception:
+        logger.exception(f"OCPP auth: töltő-lekérdezés sikertelen cp={cp_id}")
+        if mode == "enforce":
+            await _deny(ws, 503, "auth lookup failed")
+            return None
+        # log módban egy DB-hiba miatt nem zárjuk ki a töltőt
     if key_hash:
         # PBKDF2 – ne blokkolja az event loopot
         dec = await asyncio.to_thread(
@@ -129,7 +125,7 @@ async def _admit(ws: WebSocket, cp_id: Optional[str]) -> Optional[bool]:
     if scheme != "wss":
         logger.warning(f"OCPP: cp={cp_id} TITKOSÍTATLAN ws:// kapcsolat (nem wss)")
 
-    if cp_id and known:
+    if known:
         await _record_auth(cp_id, dec.result, scheme)
 
     if not dec.accept:
@@ -138,29 +134,26 @@ async def _admit(ws: WebSocket, cp_id: Optional[str]) -> Optional[bool]:
     return dec.authenticated
 
 
-async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
-    cp_id: Optional[str] = charge_point_id
-
+async def handle_ocpp(ws: WebSocket, cp_id: str):
+    """Egy töltő OCPP-kapcsolata. Az azonosító MINDIG az URL-ből jön (/ocpp/<azonosító>), és a
+    registry-be kizárólag az admit_ws-en át kerül kapcsolat (hitelesítés + duplikált-kapcsolat
+    szabály) – a töltő által küldött üzenet tartalma soha nem dönt arról, kinek a nevében beszél."""
     authenticated = await _admit(ws, cp_id)
     if authenticated is None:
         return
 
-    if cp_id:
-        ok, old = await admit_ws(cp_id, ws, authenticated)
-        if not ok:
-            logger.warning(
-                f"OCPP: cp={cp_id} második, NEM hitelesített kapcsolat elutasítva "
-                f"(a meglévő kapcsolat hitelesített)"
-            )
-            await _deny(ws, 409, "charge point already connected")
-            return
-        await ws.accept()
-        if old is not None:
-            asyncio.create_task(_close_replaced(old, cp_id))
-    else:
-        await ws.accept()
+    ok, old = await admit_ws(cp_id, ws, authenticated)
+    if not ok:
+        logger.warning(
+            f"OCPP: cp={cp_id} második, NEM hitelesített kapcsolat elutasítva "
+            f"(a meglévő kapcsolat hitelesített)"
+        )
+        await _deny(ws, 409, "charge point already connected")
+        return
+    await ws.accept()
+    if old is not None:
+        asyncio.create_task(_close_replaced(old, cp_id))
     logger.info("OCPP kapcsolat nyitva")
-    registered = bool(cp_id)
 
     try:
         while True:
@@ -184,9 +177,6 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
             # CALLRESULT (3) / CALLERROR (4) - pending remote CALL-ok miatt
             # ----------------------------------------------------------------------
             if msg_type in (3, 4):
-                if not cp_id:
-                    continue
-
                 fut = await pending_get(cp_id, unique_id)
                 if fut and not fut.done():
                     if msg_type == 3:
@@ -211,28 +201,6 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
 
             action = msg[2]
             payload = msg[3] if (len(msg) > 3 and isinstance(msg[3], dict)) else {}
-
-            # Bootból id kinyerés (ha /ocpp route)
-            if action == "BootNotification" and cp_id is None:
-                cp_id = extract_cp_id_from_boot(payload)
-                if cp_id:
-                    logger.info(f"ChargePoint ID kinyerve BootNotificationből: {cp_id}")
-                    await register_ws(cp_id, ws)
-                    registered = True
-                else:
-                    logger.warning("Nem tudtam ChargePoint ID-t kinyerni BootNotificationből")
-
-            if not cp_id:
-                # nincs cp_id, de ACK-oljunk safe defaulttal
-                await ws.send_text(json.dumps([3, unique_id, {}]))
-                continue
-
-            # registry: a kapcsolat egyszer regisztrál (kapcsolódáskor, ill. /ocpp úton a
-            # BootNotificationnél). Üzenetenként NEM írjuk újra – különben egy lecserélt (régi)
-            # kapcsolat egy késve feldolgozott üzenettel visszavenné a helyét.
-            if not registered:
-                await register_ws(cp_id, ws)
-                registered = True
 
             # ----------------------------------------------------------------------
             # ACTION DISPATCH
@@ -305,8 +273,7 @@ async def handle_ocpp(ws: WebSocket, charge_point_id: Optional[str] = None):
     except Exception as e:
         logger.exception(f"OCPP hiba: {e}")
     finally:
-        if cp_id:
-            await unregister_ws_if_same(cp_id, ws)
+        await unregister_ws_if_same(cp_id, ws)
         logger.info(f"OCPP cleanup kész (cp_id={cp_id})")
 
 
