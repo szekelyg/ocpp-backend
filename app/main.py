@@ -22,6 +22,7 @@ from app.api.routers.me import router as me_router
 from app.api.routers.integration import router as integration_router
 from app.core.cors import PathScopedCORS, portal_origins
 from app.core.rate_limit import RateLimitMiddleware
+from app.core.security_headers import SecurityHeadersMiddleware
 from app.ocpi.router import router as ocpi_router
 from app.ocpi.errors import add_ocpi_exception_handlers
 from app.ocpp.ocpp_ws import handle_ocpp
@@ -421,6 +422,10 @@ app.add_middleware(
 # Rate limit a publikus végpontokon (app/core/rate_limit.py) – a legkülső réteg, hogy a
 # korlátozott kérés semmilyen munkát ne okozzon.
 app.add_middleware(RateLimitMiddleware)
+
+# Biztonsági válaszfejlécek (HSTS, nosniff, keret-tiltás, CSP Report-Only) – mindenen kívül,
+# hogy a rate limit 429-es válaszára is rákerüljenek.
+app.add_middleware(SecurityHeadersMiddleware)
 
 # OCPI 2.2.1 (CPO role) – own "/ocpi" prefix, sibling of "/api"
 app.include_router(ocpi_router)

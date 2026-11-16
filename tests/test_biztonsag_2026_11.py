@@ -222,3 +222,32 @@ async def test_email_helyszin_nev_az_ocpp_azonosito_helyett(sent_emails):
         assert "nadudvar_belso_2" not in html and "nincs_ilyen_tolto" not in html
     for html in sent_emails[:3]:
         assert "Nádudvar, SPAR parkoló" in html
+
+
+# ── 8. Biztonsági válaszfejlécek ──────────────────────────────────────────────
+
+async def test_biztonsagi_fejlecek_minden_valaszon(client, monkeypatch):
+    from app.core import rate_limit
+    from app.services import keycloak
+
+    monkeypatch.setenv("KEYCLOAK_ISSUER", "https://id.test/realms/ugyfelek")
+    keycloak.reset_cache()
+    # API-válasz, hibaválasz, a rate limit saját 429-e
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "1")
+    rate_limit.STORE.clear()
+    monkeypatch.setattr(rate_limit, "RULES", (
+        rate_limit.Rule("teszt", "GET", rate_limit.re.compile(r"^/api/sessions/1$"), 1, 60),))
+    paths = ("/api/charge-points/", "/api/nincs-ilyen", "/api/sessions/1", "/api/sessions/1")
+    responses = [await client.get(p) for p in paths]
+    assert [r.status_code for r in responses] == [200, 404, 403, 429]
+    for r in responses:
+        assert r.headers["strict-transport-security"] == "max-age=31536000; includeSubDomains"
+        assert r.headers["x-content-type-options"] == "nosniff"
+        assert r.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+        assert r.headers["x-frame-options"] == "DENY"
+        assert "content-security-policy" not in r.headers          # egyelőre csak Report-Only
+        assert r.headers["content-security-policy-report-only"] == (
+            "default-src 'self'; connect-src 'self' https://id.test; "
+            "img-src 'self' data: https://*.tile.openstreetmap.org; frame-ancestors 'none'")
+    rate_limit.STORE.clear()
+    keycloak.reset_cache()
