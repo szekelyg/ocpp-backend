@@ -469,8 +469,11 @@ async def spa_fallback(full_path: str):
         raise HTTPException(status_code=404, detail="Not Found")
 
     # Konkrét statikus fájl (pl. /vite.svg, /favicon.ico)
-    static_file = FRONTEND_DIST / full_path
-    if static_file.is_file():
+    # A feloldott útvonalnak a frontend mappán BELÜL kell maradnia: a `//etc/passwd`
+    # (abszolút útvonal felülírja az alapmappát) és a `../` különben a konténer
+    # bármely fájlját kiszolgálná.
+    static_file = (FRONTEND_DIST / full_path).resolve()
+    if static_file.is_relative_to(FRONTEND_DIST.resolve()) and static_file.is_file():
         return FileResponse(str(static_file))
 
     if not INDEX_HTML.exists():

@@ -556,3 +556,24 @@ async def test_admin_change_config_backend_url_only_exact_wss(client, monkeypatc
     assert b["old"] == "ws://ocpp.energiafelho.hu/ocpp" and b["new"] == "wss://ocpp.energiafelho.hu/ocpp"
     assert b["status"] == "Accepted"
     assert changes == [("URL-1", "OCPPBackendJSONURL", "wss://ocpp.energiafelho.hu/ocpp")]
+
+
+# ── SPA-kiszolgáló: útvonal-bejárás (2026-11-16) ───────────────────────────────
+
+@pytest.mark.parametrize("path", ["/etc/hostname", "../../etc/hostname", "../alembic.ini"])
+async def test_spa_fallback_nem_szolgal_ki_fajlt_a_frontend_mappan_kivulrol(path, tmp_path, monkeypatch):
+    """`GET //etc/hostname` → full_path="/etc/hostname": a konténer bármely fájlja olvasható volt."""
+    import app.main as main
+
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<html>spa</html>")
+    (dist / "vite.svg").write_text("<svg/>")
+    (tmp_path / "alembic.ini").write_text("titok")
+    monkeypatch.setattr(main, "FRONTEND_DIST", dist)
+    monkeypatch.setattr(main, "INDEX_HTML", dist / "index.html")
+
+    resp = await main.spa_fallback(path)
+    assert resp.path == str(dist / "index.html")
+    # a mappán belüli statikus fájl továbbra is megy
+    assert (await main.spa_fallback("vite.svg")).path == str((dist / "vite.svg").resolve())
