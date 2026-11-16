@@ -132,8 +132,22 @@ function redirectUri() {
 }
 
 /**
+ * Saját útvonal-e (nyílt átirányítás ellen): "/"-rel kezdődik, ÉS a böngésző URL-értelmezése
+ * szerint is ezen az originen marad. A puszta "//" tiltás kevés: a böngésző a "\"-t "/"-nek
+ * veszi ("/\tamado.hu" → "//tamado.hu"), a tabot/sortörést pedig kihagyja ("/\t/tamado.hu").
+ */
+export function isOwnPath(path, origin = window.location.origin) {
+  if (typeof path !== "string" || !path.startsWith("/")) return false;
+  try {
+    return new URL(path, origin).origin === origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Átirányítás a Keycloak belépő oldalára. `returnTo`: hova jöjjünk vissza a callback után
- * (csak saját, "/"-rel kezdődő útvonal – nyílt átirányítás ellen).
+ * (csak saját útvonal – lásd isOwnPath).
  */
 export async function startKeycloakLogin({ returnTo = "/toltesek" } = {}) {
   const cfg = await getKeycloakConfig();
@@ -144,9 +158,7 @@ export async function startKeycloakLogin({ returnTo = "/toltesek" } = {}) {
   const verifier = randomString(64);
   const challenge = await sha256b64url(verifier);
   const state = randomString(32);
-  const safeReturn = typeof returnTo === "string" && returnTo.startsWith("/") && !returnTo.startsWith("//")
-    ? returnTo
-    : "/toltesek";
+  const safeReturn = isOwnPath(returnTo) ? returnTo : "/toltesek";
   try {
     sessionStorage.setItem(PKCE_KEY, JSON.stringify({ state, verifier, returnTo: safeReturn }));
   } catch {
